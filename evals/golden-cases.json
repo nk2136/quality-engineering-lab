@@ -1,0 +1,20 @@
+[
+  {
+    "id": "auth-lockout",
+    "requirement": "After five consecutive failed login attempts, lock the account for 15 minutes and show a generic message that does not reveal whether the username exists.",
+    "expectedLayers": ["api", "security"],
+    "expectedTerms": ["five", "15", "generic", "consecutive"]
+  },
+  {
+    "id": "trip-eligibility",
+    "requirement": "A member can book transportation only when eligibility is active on the appointment date. Ineligible requests must be rejected with a reason code and must not create a provider assignment.",
+    "expectedLayers": ["api", "integration"],
+    "expectedTerms": ["appointment date", "reason code", "provider assignment"]
+  },
+  {
+    "id": "realtime-order",
+    "requirement": "When an order is filled, publish the fill once, update the position and realized P&L, and deliver the new state to subscribed clients over WebSocket.",
+    "expectedLayers": ["api", "integration"],
+    "expectedTerms": ["once", "position", "P&L", "WebSocket"]
+  }
+]
