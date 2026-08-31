@@ -64,6 +64,7 @@ export interface KnowledgeSource {
 
 export const ArtifactKindSchema = z.enum([
   'context-pack',
+  'story-readiness',
   'requirement-analysis',
   'test-design',
   'review',

@@ -19,3 +19,17 @@ The assessment starts at 100 and deducts 5 points for a minor finding, 15 for a 
 - Lower scores are `needs-refinement`.
 
 The weights are intentionally simple and versioned with schema `1.0`. They provide a stable evaluation baseline and should be recalibrated only against human grooming verdicts.
+
+## Read-only workflow
+
+`runStoryReadinessWorkflow` is the first complete orchestration boundary. It:
+
+1. Creates a trace-linked workflow record.
+2. Queries a replaceable `KnowledgeSource` and builds a budgeted `ContextPack`.
+3. Persists the context pack before model execution.
+4. Calls `ModelGateway` with prompt version `story-readiness-v1`.
+5. Rejects incomplete responses, mismatched story keys, invalid schemas, and citations outside the context pack.
+6. Persists the validated assessment with provider, model, prompt, and token metadata.
+7. Stops at `waiting-for-human` with approval pending.
+
+Failures are recorded on the workflow, and any context artifact already created remains available for diagnosis. This workflow performs no Jira write-back; that remains a separate, approval-gated capability.
