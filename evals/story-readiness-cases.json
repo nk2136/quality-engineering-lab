@@ -1,0 +1,99 @@
+[
+  {
+    "schemaVersion": "1.0",
+    "id": "ready-explicit-authentication",
+    "storyKey": "QE-101",
+    "requirement": "An authenticated member can view only their own trip details. The API returns 404 for a trip owned by another member and records the denied access attempt.",
+    "evidence": [
+      {
+        "id": "jira-story",
+        "source": "jira",
+        "content": "An authenticated member can view only their own trip details. Requests for another member's trip return 404 and record the denied access attempt."
+      },
+      {
+        "id": "trip-api",
+        "source": "openapi",
+        "content": "GET /trips/{tripId} returns 200 for an owned trip, 404 when the trip is unavailable to the caller, and 401 when authentication is absent."
+      },
+      {
+        "id": "authorization-adr",
+        "source": "github",
+        "content": "Trip ownership is enforced by the authorization service before trip details are loaded."
+      }
+    ],
+    "allowedMissingEvidence": [],
+    "allowedContradictions": [],
+    "expectedDecision": "ready",
+    "expectedGaps": [],
+    "thresholds": {
+      "minimumGapRecall": 1,
+      "minimumCitationFaithfulness": 1
+    }
+  },
+  {
+    "schemaVersion": "1.0",
+    "id": "refine-missing-timeout",
+    "storyKey": "QE-102",
+    "requirement": "Submit an eligibility request to the provider gateway and show the returned eligibility status.",
+    "evidence": [
+      {
+        "id": "jira-story",
+        "source": "jira",
+        "content": "Submit an eligibility request to the provider gateway and show the returned eligibility status."
+      },
+      {
+        "id": "gateway-openapi",
+        "source": "openapi",
+        "content": "POST /eligibility returns active or inactive eligibility. No timeout response or retry behavior is specified."
+      }
+    ],
+    "allowedMissingEvidence": ["Provider gateway timeout behavior is not documented."],
+    "allowedContradictions": [],
+    "expectedDecision": "needs-refinement",
+    "expectedGaps": [
+      {
+        "id": "timeout-behavior",
+        "category": "operability",
+        "severity": "major",
+        "terms": ["timeout"]
+      }
+    ],
+    "thresholds": {
+      "minimumGapRecall": 1,
+      "minimumCitationFaithfulness": 1
+    }
+  },
+  {
+    "schemaVersion": "1.0",
+    "id": "blocked-conflicting-access-rule",
+    "storyKey": "QE-103",
+    "requirement": "Allow guest users to download reports, although the security ADR requires authentication for every report endpoint.",
+    "evidence": [
+      {
+        "id": "jira-story",
+        "source": "jira",
+        "content": "Guest users can download reports without signing in."
+      },
+      {
+        "id": "report-security-adr",
+        "source": "github",
+        "content": "All report endpoints require an authenticated principal and an authorization check."
+      }
+    ],
+    "allowedMissingEvidence": [],
+    "allowedContradictions": ["The story permits guest access, but the security ADR requires authentication."],
+    "expectedDecision": "blocked",
+    "expectedGaps": [
+      {
+        "id": "conflicting-authentication-rule",
+        "category": "security",
+        "severity": "blocking",
+        "terms": ["authentication"]
+      }
+    ],
+    "thresholds": {
+      "minimumGapRecall": 1,
+      "minimumCitationFaithfulness": 1
+    }
+  }
+]

@@ -32,6 +32,7 @@ flowchart TD
 - The reviewer is independent from the designer.
 - A rejected agent review cannot be human-approved through the supplied command.
 - Golden cases evaluate coverage, traceability, and review scores.
+- Story Readiness evals measure decision agreement, gap recall, and citation faithfulness.
 - CI runs deterministic contract tests without spending API credits.
 - Live LLM evals run only through a manually triggered protected environment.
 
@@ -81,6 +82,7 @@ src/workflows.ts          deterministic multi-agent workflows
 src/schemas.ts            typed output contracts
 src/approve.ts            human-review gate
 evals/golden-cases.json   calibration examples
+evals/story-readiness-cases.json  Story Readiness human-verdict corpus
 evals/run-live-evals.ts   repeatable behavioral checks
 tests/schemas.test.ts     deterministic contract tests
 ```
