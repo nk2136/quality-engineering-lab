@@ -33,6 +33,7 @@ flowchart TD
 - A rejected agent review cannot be human-approved through the supplied command.
 - Golden cases evaluate coverage, traceability, and review scores.
 - Story Readiness evals measure decision agreement, gap recall, and citation faithfulness.
+- The Jira Cloud adapter reads one exact issue key, normalizes ADF, and exposes no write operation.
 - CI runs deterministic contract tests without spending API credits.
 - Live LLM evals run only through a manually triggered protected environment.
 
@@ -79,6 +80,7 @@ npm run eval:live
 ```text
 src/agents.ts             specialist definitions and instructions
 src/workflows.ts          deterministic multi-agent workflows
+src/jira-cloud.ts         read-only Jira issue knowledge adapter
 src/schemas.ts            typed output contracts
 src/approve.ts            human-review gate
 evals/golden-cases.json   calibration examples
