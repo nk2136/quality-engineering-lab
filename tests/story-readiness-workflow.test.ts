@@ -28,11 +28,11 @@ const storyEvidence: ContextEvidence = {
 };
 
 class StubKnowledgeSource implements KnowledgeSource {
-  query: KnowledgeQuery | undefined;
+  readonly queries: KnowledgeQuery[] = [];
 
   async search(query: KnowledgeQuery): Promise<readonly ContextEvidence[]> {
-    this.query = query;
-    return [storyEvidence];
+    this.queries.push(query);
+    return query.sources[0] === 'jira' ? [storyEvidence] : [];
   }
 }
 
@@ -92,6 +92,7 @@ function workflowInput(): StoryReadinessWorkflowInput {
     storyKey: 'QE-42',
     objective: 'Assess QE-42 for refinement readiness.',
     queryText: 'QE-42 request submission architecture and tests',
+    sourceQueries: { jira: 'QE-42' },
     sources: ['jira', 'github', 'test'],
     asOf: '2026-08-31T20:00:00.000Z',
     maxContextTokens: 1_000,
@@ -119,7 +120,11 @@ describe('Story Readiness workflow', () => {
 
     const result = await runStoryReadinessWorkflow(workflowInput(), value);
 
-    expect(knowledge.query).toMatchObject({ traceId, maxResults: 20 });
+    expect(knowledge.queries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ traceId, text: 'QE-42', sources: ['jira'], maxResults: 20 }),
+      expect.objectContaining({ sources: ['github'] }),
+      expect.objectContaining({ sources: ['test'] }),
+    ]));
     expect(model.request).toMatchObject({ task: 'reason', promptVersion: 'story-readiness-v1' });
     expect(model.context?.evidence.map((item) => item.id)).toEqual(['jira-story']);
     expect(result.assessment).toMatchObject({ readinessScore: 95, decision: 'ready' });

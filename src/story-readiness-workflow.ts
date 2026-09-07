@@ -14,6 +14,7 @@ import {
   type WorkflowState,
   type WorkflowStore,
 } from './contracts.js';
+import { assembleKnowledge } from './knowledge-assembler.js';
 import {
   StoryReadinessDraftSchema,
   finalizeStoryReadiness,
@@ -30,27 +31,40 @@ const ContextSeedSchema = z.object({
   missingEvidence: z.array(z.string().min(1)).default([]),
 });
 
-export const StoryReadinessWorkflowInputSchema = z.object({
-  traceId: z.string().uuid(),
-  storyKey: z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/),
-  objective: z.string().min(1),
-  queryText: z.string().min(1),
-  sources: z.array(EvidenceSourceSchema).min(1),
-  asOf: z.string().datetime(),
-  maxResults: z.number().int().positive().default(20),
-  maxContextTokens: z.number().int().positive(),
-  reservedTokens: z.number().int().nonnegative().default(0),
-  maxOutputTokens: z.number().int().positive().default(2_000),
-  contextSeed: ContextSeedSchema.default({
-    acceptanceCriteria: [],
-    constraints: [],
-    architectureFacts: [],
-    ownershipFacts: [],
-    priorSignals: [],
-    contradictions: [],
-    missingEvidence: [],
-  }),
-});
+export const StoryReadinessWorkflowInputSchema = z
+  .object({
+    traceId: z.string().uuid(),
+    storyKey: z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/),
+    objective: z.string().min(1),
+    queryText: z.string().min(1),
+    sourceQueries: z.partialRecord(EvidenceSourceSchema, z.string().min(1)).optional(),
+    sources: z.array(EvidenceSourceSchema).min(1),
+    asOf: z.string().datetime(),
+    maxResults: z.number().int().positive().default(20),
+    maxContextTokens: z.number().int().positive(),
+    reservedTokens: z.number().int().nonnegative().default(0),
+    maxOutputTokens: z.number().int().positive().default(2_000),
+    contextSeed: ContextSeedSchema.default({
+      acceptanceCriteria: [],
+      constraints: [],
+      architectureFacts: [],
+      ownershipFacts: [],
+      priorSignals: [],
+      contradictions: [],
+      missingEvidence: [],
+    }),
+  })
+  .superRefine((input, context) => {
+    for (const source of Object.keys(input.sourceQueries ?? {})) {
+      if (!input.sources.includes(EvidenceSourceSchema.parse(source))) {
+        context.addIssue({
+          code: 'custom',
+          path: ['sourceQueries', source],
+          message: `Source query '${source}' is not included in sources.`,
+        });
+      }
+    }
+  });
 
 export type StoryReadinessWorkflowInput = z.input<typeof StoryReadinessWorkflowInputSchema>;
 
@@ -109,13 +123,16 @@ export async function runStoryReadinessWorkflow(
   await dependencies.workflows.create(initialWorkflow);
 
   try {
-    const evidence = await dependencies.knowledge.search({
+    const evidence = await assembleKnowledge({
       traceId: input.traceId,
-      text: input.queryText,
-      sources: input.sources,
-      maxResults: input.maxResults,
       asOf: input.asOf,
-    });
+      queries: input.sources.map((source) => ({
+        source,
+        text: input.sourceQueries?.[source] ?? input.queryText,
+        maxResults: input.maxResults,
+      })),
+      maxTotalResults: input.maxResults,
+    }, dependencies.knowledge);
 
     const evidenceCandidates = [...evidence];
     const contextPack = buildContextPack({

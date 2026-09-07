@@ -34,6 +34,7 @@ flowchart TD
 - Golden cases evaluate coverage, traceability, and review scores.
 - Story Readiness evals measure decision agreement, gap recall, and citation faithfulness.
 - The Jira Cloud adapter reads one exact issue key, normalizes ADF, and exposes no write operation.
+- Knowledge assembly preserves source-specific query semantics and validates evidence attribution.
 - CI runs deterministic contract tests without spending API credits.
 - Live LLM evals run only through a manually triggered protected environment.
 
@@ -81,6 +82,7 @@ npm run eval:live
 src/agents.ts             specialist definitions and instructions
 src/workflows.ts          deterministic multi-agent workflows
 src/jira-cloud.ts         read-only Jira issue knowledge adapter
+src/knowledge-assembler.ts source-specific context routing and assembly
 src/schemas.ts            typed output contracts
 src/approve.ts            human-review gate
 evals/golden-cases.json   calibration examples
