@@ -1,0 +1,30 @@
+[
+  {
+    "schemaVersion": "1.0",
+    "id": "story-and-authorization-architecture",
+    "query": "eligibility authorization architecture decision",
+    "expectedRelevantEvidenceIds": ["jira-story", "github-authorization-adr"],
+    "requiredSources": ["jira", "github"],
+    "thresholds": {
+      "k": 3,
+      "minimumRecallAtK": 1,
+      "minimumPrecisionAtK": 0.66,
+      "minimumReciprocalRank": 1,
+      "minimumSourceCoverage": 1
+    }
+  },
+  {
+    "schemaVersion": "1.0",
+    "id": "test-history-for-timeout",
+    "query": "gateway timeout integration test history",
+    "expectedRelevantEvidenceIds": ["github-timeout-test", "ci-timeout-failure"],
+    "requiredSources": ["github", "ci"],
+    "thresholds": {
+      "k": 3,
+      "minimumRecallAtK": 1,
+      "minimumPrecisionAtK": 0.66,
+      "minimumReciprocalRank": 1,
+      "minimumSourceCoverage": 1
+    }
+  }
+]

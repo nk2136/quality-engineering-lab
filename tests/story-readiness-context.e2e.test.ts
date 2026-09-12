@@ -1,36 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import type { ContextEvidence, ContextPack } from '../src/context.js';
+import type { ContextPack } from '../src/context.js';
 import type {
-  KnowledgeQuery,
-  KnowledgeSource,
   ModelGateway,
   ModelRequest,
   ModelResponse,
 } from '../src/contracts.js';
+import {
+  GitHubRepositoryKnowledgeSource,
+  type GitHubHttpClient,
+} from '../src/github-repository.js';
 import { InMemoryArtifactStore, InMemoryWorkflowStore } from '../src/in-memory-stores.js';
 import { JiraCloudKnowledgeSource, type JiraHttpClient } from '../src/jira-cloud.js';
 import { CompositeKnowledgeSource } from '../src/knowledge-assembler.js';
+import { evaluateKnowledgeRetrieval } from '../src/knowledge-retrieval-eval.js';
 import { runStoryReadinessWorkflow } from '../src/story-readiness-workflow.js';
 
 const traceId = '30d43a8e-5160-4db6-a3a5-7096c304f861';
-
-class GitHubArchitectureSource implements KnowledgeSource {
-  query: KnowledgeQuery | undefined;
-
-  async search(query: KnowledgeQuery): Promise<readonly ContextEvidence[]> {
-    this.query = query;
-    return [{
-      id: 'github:adr-007',
-      source: 'github',
-      uri: 'https://github.example.test/acme/product/blob/main/docs/adr-007.md',
-      revision: 'abc123',
-      retrievedAt: query.asOf,
-      content: 'ADR-007 requires service-to-service authorization for eligibility requests.',
-      estimatedTokens: 20,
-      relevance: 0.95,
-    }];
-  }
-}
+const repositoryRevision = 'a'.repeat(40);
+const architectureRevision = 'b'.repeat(40);
+const architectureEvidenceId =
+  `github:acme/product:docs/adr-007.md:${architectureRevision}`;
 
 class EvidenceAwareModel implements ModelGateway {
   context: ContextPack | undefined;
@@ -55,7 +44,7 @@ class EvidenceAwareModel implements ModelGateway {
           severity: 'blocking',
           summary: 'Service authorization is unspecified.',
           impact: 'The implementation cannot be verified against the architecture requirement.',
-          basis: { kind: 'evidence', evidenceIds: [jiraId, 'github:adr-007'] },
+          basis: { kind: 'evidence', evidenceIds: [jiraId, architectureEvidenceId] },
         }],
         refinementQuestions: [{
           question: 'Which service identity and authorization policy must the request use?',
@@ -103,7 +92,31 @@ describe('Story Readiness cross-source context', () => {
       baseUrl: 'https://example.atlassian.net',
       httpClient,
     });
-    const github = new GitHubArchitectureSource();
+    let githubRequestUrl = '';
+    const githubHttpClient: GitHubHttpClient = async (url) => {
+      githubRequestUrl = url;
+      const content =
+        'ADR-007 requires service-to-service authorization for eligibility requests.';
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          type: 'file',
+          encoding: 'base64',
+          size: Buffer.byteLength(content),
+          path: 'docs/adr-007.md',
+          sha: architectureRevision,
+          content: Buffer.from(content).toString('base64'),
+        }),
+      };
+    };
+    const github = new GitHubRepositoryKnowledgeSource({
+      repository: 'acme/product',
+      revision: repositoryRevision,
+      paths: ['docs/adr-007.md'],
+      httpClient: githubHttpClient,
+    });
     const model = new EvidenceAwareModel();
     const artifacts = new InMemoryArtifactStore();
     const workflows = new InMemoryWorkflowStore();
@@ -130,15 +143,31 @@ describe('Story Readiness cross-source context', () => {
     });
 
     expect(jiraRequestCount).toBe(1);
-    expect(github.query).toMatchObject({
-      text: 'eligibility authorization architecture decision',
-      sources: ['github'],
-    });
+    expect(githubRequestUrl).toContain(
+      `/contents/docs/adr-007.md?ref=${repositoryRevision}`,
+    );
     expect(model.context?.evidence.map((item) => item.source).sort()).toEqual([
       'github',
       'jira',
     ]);
     expect(result.assessment).toMatchObject({ readinessScore: 70, decision: 'blocked' });
+    const jiraEvidenceId = result.contextPack.evidence
+      .find((item) => item.source === 'jira')?.id;
+    expect(jiraEvidenceId).toBeDefined();
+    expect(evaluateKnowledgeRetrieval(result.contextPack.evidence, {
+      schemaVersion: '1.0',
+      id: 'mocked-cross-source-workflow',
+      query: 'eligibility authorization architecture decision',
+      expectedRelevantEvidenceIds: [jiraEvidenceId!, architectureEvidenceId],
+      requiredSources: ['jira', 'github'],
+      thresholds: {
+        k: 2,
+        minimumRecallAtK: 1,
+        minimumPrecisionAtK: 1,
+        minimumReciprocalRank: 1,
+        minimumSourceCoverage: 1,
+      },
+    })).toMatchObject({ passed: true, recallAtK: 1, sourceCoverage: 1 });
     expect(result.workflow.status).toBe('waiting-for-human');
     expect(await artifacts.listByTrace(traceId)).toHaveLength(2);
   });

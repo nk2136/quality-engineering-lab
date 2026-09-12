@@ -33,6 +33,7 @@ flowchart TD
 - A rejected agent review cannot be human-approved through the supplied command.
 - Golden cases evaluate coverage, traceability, and review scores.
 - Story Readiness evals measure decision agreement, gap recall, and citation faithfulness.
+- Retrieval evals measure recall, precision, rank, source coverage, and duplicate evidence.
 - The Jira Cloud adapter reads one exact issue key, normalizes ADF, and exposes no write operation.
 - Knowledge assembly preserves source-specific query semantics and validates evidence attribution.
 - The GitHub adapter reads an allowlisted file manifest at an immutable revision.
@@ -89,6 +90,7 @@ src/schemas.ts            typed output contracts
 src/approve.ts            human-review gate
 evals/golden-cases.json   calibration examples
 evals/story-readiness-cases.json  Story Readiness human-verdict corpus
+evals/knowledge-retrieval-cases.json  product-context retrieval corpus
 evals/run-live-evals.ts   repeatable behavioral checks
 tests/schemas.test.ts     deterministic contract tests
 ```

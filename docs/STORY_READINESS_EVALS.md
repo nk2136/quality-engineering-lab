@@ -21,3 +21,5 @@ Each case defines explicit pass thresholds. The initial corpus requires exact de
 3. A blocked story whose access requirement conflicts with a security decision record.
 
 Each case contains sanitized source excerpts rather than citation identifiers alone. The deterministic test suite validates both the corpus and evaluator without calling a model. A later live runner can build context from these excerpts and feed model assessments into the same evaluator, preserving identical scoring between local comparisons and CI.
+
+Retrieval itself is evaluated separately before model reasoning. See [Knowledge retrieval evaluations](./KNOWLEDGE_RETRIEVAL_EVALS.md) for recall, precision, rank, source coverage, and duplicate-result checks.
