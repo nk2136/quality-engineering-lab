@@ -82,6 +82,10 @@ npm run eval:live
 
 The CLI currently exposes `plan` and `triage`, not a Story Readiness command. Story Readiness is exercised through its library API and mocked end-to-end tests. The existing approval command approves a QA-plan artifact; it is not yet a durable lifecycle approval/resume service. Never commit API keys or pass credentials into model-visible context.
 
+### Durable workflow checkpoints
+
+`FileWorkflowStore` and `FileArtifactStore` provide filesystem-backed persistence for lifecycle checkpoints and artifacts. The current Story Readiness workflow continues to use its existing store wiring; a later vertical-slice plan will connect it to these durable stores.
+
 ## Repository map
 
 ```text
@@ -90,6 +94,8 @@ src/workflows.ts          deterministic multi-agent workflows
 src/context.ts            budgeted, versioned evidence packs
 src/contracts.ts          model, knowledge, workflow and artifact contracts
 src/in-memory-stores.ts   reference stores; not durable persistence
+src/filesystem-stores.ts  durable filesystem workflow and artifact stores
+src/lifecycle-coordinator.ts  deterministic lifecycle transitions and recovery
 src/story-readiness-workflow.ts  context-to-assessment library workflow
 src/jira-cloud.ts         read-only Jira issue knowledge adapter
 src/github-repository.ts  pinned, allowlisted repository knowledge adapter
@@ -109,7 +115,7 @@ tests/schemas.test.ts     deterministic contract tests
 
 The two-week sprint targets September 25, 2026. This is a delivery target, not a claim of completion or universal database/framework support. The scope is one pinned TypeScript/Playwright repository and a disposable local demo application. This sequence refines the broader phases in [Architecture decisions](docs/AI_ENGINEERING_LANDSCAPE.md).
 
-- [ ] Add a deterministic lifecycle coordinator with durable checkpoints, structured artifact handoffs, idempotency, bounded retries, cancellation, and crash recovery.
+- [x] Add a deterministic lifecycle coordinator with durable checkpoints, structured artifact handoffs, idempotency, bounded retries, cancellation, and crash recovery.
 - [ ] Inventory existing tests, assertions, fixtures, helpers, page objects, and API clients at a pinned revision.
 - [ ] Map acceptance criteria to evidence and decide: reuse coverage, extend a test, create a missing test, or stop for insufficient evidence.
 - [ ] Connect context and coverage reasoning through a concrete `ModelGateway` and a runnable CLI, keeping offline fixtures clearly separate from real-model results.
