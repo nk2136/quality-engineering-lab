@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
-import { hostname, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   ConcurrencyConflictError,
   DuplicateRecordError,
+  WorkflowStateSchema,
   type ArtifactRecord,
   type WorkflowState,
 } from '../src/contracts.js';
@@ -110,6 +111,34 @@ describe('filesystem stores', () => {
     await expect(store.save(saved, 0)).rejects.toBeInstanceOf(ConcurrencyConflictError);
   });
 
+  it('keeps every workflow version as a validated immutable checkpoint', async () => {
+    const store = new FileWorkflowStore(await root());
+    await store.create(workflow());
+    const first = await store.save({ ...workflow(), status: 'running' }, 0);
+    const second = await store.save({ ...first, status: 'waiting-for-human' }, 1);
+    const directory = dirname(store.pathFor(workflow().id));
+
+    expect((await readdir(directory)).sort()).toEqual(['0.json', '1.json', '2.json']);
+    for (const version of [0, 1, 2]) {
+      const record = WorkflowStateSchema.parse(
+        JSON.parse(await readFile(join(directory, `${version}.json`), 'utf8')),
+      );
+      expect(record).toMatchObject({ id: workflow().id, version });
+    }
+  });
+
+  it('rejects a delayed old writer without changing the winning checkpoint', async () => {
+    const store = new FileWorkflowStore(await root());
+    await store.create(workflow());
+    const delayed = { ...workflow(), status: 'waiting-for-human' as const };
+    const winner = await store.save({ ...workflow(), status: 'running' }, 0);
+
+    await expect(store.save(delayed, 0)).rejects.toBeInstanceOf(ConcurrencyConflictError);
+
+    expect(await store.get(workflow().id)).toEqual(winner);
+    expect(JSON.parse(await readFile(store.pathFor(workflow().id, 1), 'utf8'))).toEqual(winner);
+  });
+
   it('validates persisted data when it is read', async () => {
     const store = new FileWorkflowStore(await root());
     await store.create(workflow());
@@ -125,6 +154,7 @@ describe('filesystem stores', () => {
     await artifacts.put(artifact('actual-artifact'));
     await workflows.create({ ...workflow(), id: 'actual-workflow' });
     await writeFile(artifacts.pathFor('requested-artifact'), JSON.stringify(artifact('actual-artifact')));
+    await mkdir(dirname(workflows.pathFor('requested-workflow')), { recursive: true });
     await writeFile(
       workflows.pathFor('requested-workflow'),
       JSON.stringify({ ...workflow(), id: 'actual-workflow' }),
@@ -188,116 +218,6 @@ describe('filesystem stores', () => {
     expect(results.map(({ code }) => code)).toEqual([0, 0]);
     expect(results.map(({ errors }) => errors)).toEqual(['', '']);
     expect(await store.get(workflow().id)).toMatchObject({ version: 1 });
-  }, 20_000);
-
-  it('reclaims an expired lease even when its recorded PID is currently live', async () => {
-    const path = await root();
-    const store = new FileWorkflowStore(path, {
-      lockTimeoutMs: 100,
-      lockStaleMs: 40,
-      lockHeartbeatMs: 10,
-      lockRetryMs: 5,
-    });
-    await store.create(workflow());
-    const lockPath = `${store.pathFor(workflow().id)}.lock`;
-    const old = new Date(Date.now() - 60_000);
-    await mkdir(lockPath);
-    await writeFile(
-      join(lockPath, 'owner.json'),
-      JSON.stringify({
-        token: 'expired-owner',
-        createdAt: old.toISOString(),
-        renewedAt: old.toISOString(),
-        host: hostname(),
-        pid: process.pid,
-      }),
-      'utf8',
-    );
-    await utimes(lockPath, old, old);
-
-    const pending = store.save({ ...workflow(), status: 'running' }, 0);
-    const outcome = await Promise.race([
-      pending.then(() => 'saved'),
-      new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 150)),
-    ]);
-    await rm(lockPath, { recursive: true, force: true });
-    await pending;
-
-    expect(outcome).toBe('saved');
-  });
-
-  it('does not reclaim a lease that continues to renew', async () => {
-    const path = await root();
-    const store = new FileWorkflowStore(path, {
-      lockTimeoutMs: 80,
-      lockStaleMs: 40,
-      lockHeartbeatMs: 10,
-      lockRetryMs: 5,
-    });
-    await store.create(workflow());
-    const lockPath = `${store.pathFor(workflow().id)}.lock`;
-    const ownerPath = join(lockPath, 'owner.json');
-    await mkdir(lockPath);
-    const renew = async () => {
-      await writeFile(
-        ownerPath,
-        JSON.stringify({
-          token: 'renewing-owner',
-          createdAt: new Date().toISOString(),
-          renewedAt: new Date().toISOString(),
-        }),
-        'utf8',
-      );
-      const now = new Date();
-      await utimes(lockPath, now, now);
-    };
-    await renew();
-    let renewal = Promise.resolve();
-    const heartbeat = setInterval(() => {
-      renewal = renewal.then(renew);
-    }, 10);
-
-    const pending = store
-      .save({ ...workflow(), status: 'running' }, 0)
-      .then(() => 'saved', (error: unknown) => (error instanceof Error ? error.message : 'error'));
-    const result = await Promise.race([
-      pending,
-      new Promise<'still-pending'>((resolve) => setTimeout(() => resolve('still-pending'), 150)),
-    ]);
-    clearInterval(heartbeat);
-    await renewal;
-    expect(JSON.parse(await readFile(ownerPath, 'utf8')).token).toBe('renewing-owner');
-    await rm(lockPath, { recursive: true, force: true });
-    await pending;
-
-    expect(result).toMatch(/Timed out acquiring lease/);
-  });
-
-  it('aborts a save and preserves the lock when its ownership token changes', async () => {
-    const path = await root();
-    const store = new FileWorkflowStore(path);
-    await store.create(workflow());
-    const child = saveInChild(path, 'token-test', 'running');
-    await waitFor(join(path, 'ready-token-test'));
-    await writeFile(join(path, 'go'), 'go', 'utf8');
-    const lockPath = `${store.pathFor(workflow().id)}.lock`;
-    const ownerPath = join(lockPath, 'owner.json');
-    await waitFor(ownerPath);
-    const replacement = {
-      token: 'replacement-owner',
-      createdAt: new Date().toISOString(),
-      renewedAt: new Date().toISOString(),
-    };
-    const temporaryPath = `${ownerPath}.replacement`;
-    await writeFile(temporaryPath, JSON.stringify(replacement), 'utf8');
-    await rename(temporaryPath, ownerPath);
-
-    const result = await child.result;
-    expect(result.output).toMatch(/lease .* lost/i);
-    expect(result.code).toBe(0);
-    expect(result.errors).toBe('');
-    expect(JSON.parse(await readFile(ownerPath, 'utf8')).token).toBe(replacement.token);
-    await rm(lockPath, { recursive: true, force: true });
   }, 20_000);
 
   it('does not expose partial JSON while publishing a new artifact', async () => {
@@ -367,8 +287,6 @@ describe('filesystem stores', () => {
     expect(first).toMatchObject({ id, status: 'running', version: 1 });
     expect(second).toMatchObject({ id, status: 'waiting-for-human', version: 2 });
     expect(await workflows.get(id)).toEqual(second);
-    expect(await readdir(join(path, 'workflows'))).toEqual([
-      `${Buffer.from(id, 'utf8').toString('hex')}.json`,
-    ]);
+    expect(await readdir(dirname(workflows.pathFor(id)))).toEqual(['0.json', '1.json', '2.json']);
   });
 });
