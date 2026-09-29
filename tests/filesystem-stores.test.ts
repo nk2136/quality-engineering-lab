@@ -178,6 +178,19 @@ describe('filesystem stores', () => {
     ]);
   });
 
+  it('rejects invalid artifact lookup identifiers at the input boundary', async () => {
+    const store = new FileArtifactStore(await root());
+
+    await expect(store.get('x'.repeat(101))).rejects.toThrow(/100 UTF-8 bytes/);
+    await expect(store.get('\ud800')).rejects.toThrow(/unpaired UTF-16 surrogate/);
+  });
+
+  it('rejects invalid trace identifiers at the input boundary', async () => {
+    const store = new FileArtifactStore(await root());
+
+    await expect(store.listByTrace('not-a-uuid')).rejects.toThrow();
+  });
+
   it('allows only one concurrent save for the same workflow version', async () => {
     const path = await root();
     const first = new FileWorkflowStore(path);

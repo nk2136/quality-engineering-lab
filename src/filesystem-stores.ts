@@ -72,14 +72,18 @@ export class FileArtifactStore implements ArtifactStore {
   }
 
   async get(id: string): Promise<ArtifactRecord | undefined> {
-    const value = await readOptional(this.pathFor(id));
+    const validatedId = RecordIdSchema.parse(id);
+    const value = await readOptional(this.pathFor(validatedId));
     if (value === undefined) return undefined;
     const record = ArtifactRecordSchema.parse(value);
-    if (record.id !== id) throw new Error(`Artifact '${id}' contains record '${record.id}'.`);
+    if (record.id !== validatedId) {
+      throw new Error(`Artifact '${validatedId}' contains record '${record.id}'.`);
+    }
     return record;
   }
 
   async listByTrace(traceId: string): Promise<readonly ArtifactRecord[]> {
+    const validatedTraceId = ArtifactRecordSchema.shape.traceId.parse(traceId);
     const directory = join(this.root, 'artifacts');
     let entries;
     try {
@@ -96,7 +100,7 @@ export class FileArtifactStore implements ArtifactStore {
     );
     return records
       .map((record) => ArtifactRecordSchema.parse(record))
-      .filter((record) => record.traceId === traceId)
+      .filter((record) => record.traceId === validatedTraceId)
       .sort(
         (left, right) =>
           left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
