@@ -7,6 +7,7 @@
 - The repository is fixed when the adapter is created.
 - Every request uses a full 40- or 64-character Git object ID, never a mutable branch or tag.
 - Only normalized, unique paths from a manifest of at most 50 files can be read.
+- The repository, full object ID, and file manifest are the GitHub allowlist.
 - Requests use `GET`, reject redirects, enforce timeouts, and target `api.github.com` only.
 - Authorization is injected at runtime and never enters model context or error messages.
 - Files are limited to 1 MB, must be Base64-encoded UTF-8, and must match their declared byte size.
@@ -14,5 +15,7 @@
 - The adapter provides no discovery, code search, branch lookup, file write, pull request, or merge operation.
 
 The adapter performs deterministic lexical ranking across the configured manifest. This is intentionally a bounded baseline; hybrid or embedding retrieval should replace it only after improving the Story Readiness retrieval evaluation corpus.
+
+`createLiveReadinessKnowledgeSource` composes this adapter with the Jira adapter from non-secret policy. Authorization callbacks are runtime-only and remain outside policy and agent-facing context.
 
 GitHub documents that the contents endpoint accepts a `ref`, returns Base64 file content, and needs only read-level Contents permission for fine-grained tokens and GitHub Apps: [REST API endpoints for repository contents](https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content).

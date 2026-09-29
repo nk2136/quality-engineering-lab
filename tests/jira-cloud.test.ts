@@ -68,6 +68,7 @@ describe('Jira Cloud knowledge source', () => {
     };
     const source = new JiraCloudKnowledgeSource({
       baseUrl: 'https://example.atlassian.net/',
+      allowedIssueKeys: ['QE-42'],
       authorization: async () => 'Basic runtime-secret',
       httpClient,
     });
@@ -102,6 +103,7 @@ describe('Jira Cloud knowledge source', () => {
     let calls = 0;
     const source = new JiraCloudKnowledgeSource({
       baseUrl: 'https://example.atlassian.net',
+      allowedIssueKeys: ['QE-42'],
       httpClient: async () => {
         calls += 1;
         throw new Error('HTTP should not be called.');
@@ -117,15 +119,40 @@ describe('Jira Cloud knowledge source', () => {
   it('rejects broad queries instead of converting uncontrolled text into JQL', async () => {
     const source = new JiraCloudKnowledgeSource({
       baseUrl: 'https://example.atlassian.net',
+      allowedIssueKeys: ['QE-42'],
       httpClient: async () => { throw new Error('HTTP should not be called.'); },
     });
 
     await expect(source.search({ ...query, text: 'Find stories in QE' })).rejects.toThrow();
   });
 
+  it('rejects an issue outside the allowlist before resolving credentials or HTTP', async () => {
+    let credentials = 0;
+    let requests = 0;
+    const source = new JiraCloudKnowledgeSource({
+      baseUrl: 'https://example.atlassian.net',
+      allowedIssueKeys: ['QE-42'],
+      authorization: async () => {
+        credentials += 1;
+        return 'Basic never-used';
+      },
+      httpClient: async () => {
+        requests += 1;
+        throw new Error('HTTP should not be called.');
+      },
+    });
+
+    await expect(source.search({ ...query, text: 'QE-43' })).rejects.toThrow(
+      "Jira issue 'QE-43' is not in the configured allowlist.",
+    );
+    expect(credentials).toBe(0);
+    expect(requests).toBe(0);
+  });
+
   it('returns a typed, sanitized Jira error without exposing authorization', async () => {
     const source = new JiraCloudKnowledgeSource({
       baseUrl: 'https://example.atlassian.net',
+      allowedIssueKeys: ['QE-42'],
       authorization: async () => 'Basic do-not-expose',
       httpClient: async () => ({
         ok: false,
@@ -149,7 +176,10 @@ describe('Jira Cloud knowledge source', () => {
   });
 
   it('rejects insecure base URLs and normalizes supported ADF inline nodes', () => {
-    expect(() => new JiraCloudKnowledgeSource({ baseUrl: 'http://jira.example.test' }))
+    expect(() => new JiraCloudKnowledgeSource({
+      baseUrl: 'http://jira.example.test',
+      allowedIssueKeys: ['QE-42'],
+    }))
       .toThrow('Jira Cloud baseUrl must use HTTPS.');
     expect(adfToText({
       type: 'paragraph',

@@ -90,6 +90,7 @@ describe('Story Readiness cross-source context', () => {
     };
     const jira = new JiraCloudKnowledgeSource({
       baseUrl: 'https://example.atlassian.net',
+      allowedIssueKeys: ['QE-42'],
       httpClient,
     });
     let githubRequestUrl = '';

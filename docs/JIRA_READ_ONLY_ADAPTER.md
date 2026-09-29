@@ -5,6 +5,7 @@
 ## Security boundary
 
 - The base URL must use HTTPS and cannot contain credentials.
+- `allowedIssueKeys` is mandatory: each exact key is checked before authorization is resolved or HTTP is called.
 - Authorization is supplied at runtime through a callback and is never included in evidence or error messages.
 - Redirects are rejected to prevent an authorization header from being forwarded to another origin.
 - Requests have a configurable timeout capped at 60 seconds.
@@ -20,5 +21,7 @@ The normalized issue becomes one immutable `ContextEvidence` record. Its revisio
 ## Deliberate limits
 
 This increment does not retrieve comments, attachments, changelog history, Confluence pages, or execute JQL. Those are paginated and permission-sensitive capabilities that should be introduced behind separate tests and retrieval budgets. No Jira write operation exists in this adapter.
+
+`createLiveReadinessKnowledgeSource` composes this adapter with the GitHub adapter from non-secret policy. Its runtime credential callbacks remain outside policy and agent-facing context.
 
 References: [Jira Cloud REST API v3](https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/) and [Atlassian Document Format](https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/).
