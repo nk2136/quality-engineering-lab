@@ -1,5 +1,7 @@
-import { mkdir, open, readdir, rm } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { link, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
+import { dirname, join } from 'node:path';
 import {
   ArtifactRecordSchema,
   ConcurrencyConflictError,
@@ -12,7 +14,9 @@ import {
 } from './contracts.js';
 import { readJson, writeJsonAtomic } from './io.js';
 
-const saveQueues = new Map<string, Promise<unknown>>();
+const lockRetryMs = 10;
+const lockTimeoutMs = 5_000;
+const staleLockMs = 30_000;
 
 function isCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
@@ -28,41 +32,109 @@ async function readOptional(path: string): Promise<unknown | undefined> {
 }
 
 async function createExclusive(path: string, value: unknown, duplicate: Error): Promise<void> {
+  const json = `${JSON.stringify(value, null, 2)}\n`;
   await mkdir(dirname(path), { recursive: true });
-  let handle;
-  try {
-    handle = await open(path, 'wx');
-  } catch (error) {
-    if (isCode(error, 'EEXIST')) throw duplicate;
-    throw error;
-  }
+  const temporaryPath = `${path}.${randomUUID()}.tmp`;
 
   try {
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  } catch (error) {
-    await handle.close().catch(() => undefined);
-    await rm(path, { force: true });
-    throw error;
+    const handle = await open(temporaryPath, 'wx');
+    try {
+      await handle.writeFile(json, 'utf8');
+    } finally {
+      await handle.close();
+    }
+    try {
+      await link(temporaryPath, path);
+    } catch (error) {
+      if (isCode(error, 'EEXIST')) throw duplicate;
+      throw error;
+    }
+  } finally {
+    await rm(temporaryPath, { force: true });
   }
-  await handle.close();
 }
 
-function serialize<T>(path: string, operation: () => Promise<T>): Promise<T> {
-  const key = process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
-  const previous = saveQueues.get(key) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
-  saveQueues.set(key, current);
-  void current.finally(() => {
-    if (saveQueues.get(key) === current) saveQueues.delete(key);
-  }).catch(() => undefined);
-  return current;
+async function ownerIsAlive(lockPath: string): Promise<boolean> {
+  try {
+    const owner = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')) as {
+      host?: unknown;
+      pid?: unknown;
+    };
+    if (owner.host !== hostname() || typeof owner.pid !== 'number') return false;
+    try {
+      process.kill(owner.pid, 0);
+      return true;
+    } catch (error) {
+      return !isCode(error, 'ESRCH');
+    }
+  } catch (error) {
+    if (isCode(error, 'ENOENT') || error instanceof SyntaxError) return false;
+    throw error;
+  }
+}
+
+async function reclaimStaleLock(lockPath: string): Promise<void> {
+  let lockStat;
+  try {
+    lockStat = await stat(lockPath);
+  } catch (error) {
+    if (isCode(error, 'ENOENT')) return;
+    throw error;
+  }
+  if (Date.now() - lockStat.mtimeMs <= staleLockMs || (await ownerIsAlive(lockPath))) return;
+
+  const stalePath = `${lockPath}.${randomUUID()}.stale`;
+  try {
+    await rename(lockPath, stalePath);
+  } catch (error) {
+    if (isCode(error, 'ENOENT')) return;
+    throw error;
+  }
+  await rm(stalePath, { recursive: true, force: true });
+}
+
+async function acquireLock(path: string): Promise<string> {
+  const lockPath = `${path}.lock`;
+  const deadline = Date.now() + lockTimeoutMs;
+  await mkdir(dirname(path), { recursive: true });
+  while (true) {
+    try {
+      await mkdir(lockPath);
+    } catch (error) {
+      if (!isCode(error, 'EEXIST')) throw error;
+      await reclaimStaleLock(lockPath);
+      if (Date.now() >= deadline) throw new Error(`Timed out acquiring lock for '${path}'.`);
+      await new Promise((resolve) => setTimeout(resolve, lockRetryMs));
+      continue;
+    }
+    try {
+      await writeFile(
+        join(lockPath, 'owner.json'),
+        `${JSON.stringify({ host: hostname(), pid: process.pid, createdAt: new Date().toISOString() })}\n`,
+        'utf8',
+      );
+      return lockPath;
+    } catch (error) {
+      await rm(lockPath, { recursive: true, force: true });
+      throw error;
+    }
+  }
+}
+
+async function withLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const lockPath = await acquireLock(path);
+  try {
+    return await operation();
+  } finally {
+    await rm(lockPath, { recursive: true, force: true });
+  }
 }
 
 export class FileArtifactStore implements ArtifactStore {
   constructor(private readonly root: string) {}
 
   pathFor(id: string): string {
-    return join(this.root, 'artifacts', `${Buffer.from(id).toString('base64url')}.json`);
+    return join(this.root, 'artifacts', `${Buffer.from(id, 'utf8').toString('hex')}.json`);
   }
 
   async put(artifact: ArtifactRecord): Promise<void> {
@@ -76,7 +148,10 @@ export class FileArtifactStore implements ArtifactStore {
 
   async get(id: string): Promise<ArtifactRecord | undefined> {
     const value = await readOptional(this.pathFor(id));
-    return value === undefined ? undefined : ArtifactRecordSchema.parse(value);
+    if (value === undefined) return undefined;
+    const record = ArtifactRecordSchema.parse(value);
+    if (record.id !== id) throw new Error(`Artifact '${id}' contains record '${record.id}'.`);
+    return record;
   }
 
   async listByTrace(traceId: string): Promise<readonly ArtifactRecord[]> {
@@ -108,7 +183,7 @@ export class FileWorkflowStore implements WorkflowStore {
   constructor(private readonly root: string) {}
 
   pathFor(id: string): string {
-    return join(this.root, 'workflows', `${Buffer.from(id).toString('base64url')}.json`);
+    return join(this.root, 'workflows', `${Buffer.from(id, 'utf8').toString('hex')}.json`);
   }
 
   async create(state: WorkflowState): Promise<void> {
@@ -122,13 +197,16 @@ export class FileWorkflowStore implements WorkflowStore {
 
   async get(id: string): Promise<WorkflowState | undefined> {
     const value = await readOptional(this.pathFor(id));
-    return value === undefined ? undefined : WorkflowStateSchema.parse(value);
+    if (value === undefined) return undefined;
+    const record = WorkflowStateSchema.parse(value);
+    if (record.id !== id) throw new Error(`Workflow '${id}' contains record '${record.id}'.`);
+    return record;
   }
 
   save(state: WorkflowState, expectedVersion: number): Promise<WorkflowState> {
     const validated = WorkflowStateSchema.parse(state);
     const path = this.pathFor(validated.id);
-    return serialize(path, async () => {
+    return withLock(path, async () => {
       const current = await this.get(validated.id);
       if (current === undefined) throw new Error(`Workflow '${validated.id}' does not exist.`);
       if (current.version !== expectedVersion) {

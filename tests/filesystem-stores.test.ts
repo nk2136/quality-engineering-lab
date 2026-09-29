@@ -1,5 +1,7 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { access, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -48,6 +50,35 @@ async function root(): Promise<string> {
   return path;
 }
 
+async function waitFor(path: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw new Error(`Timed out waiting for ${path}`);
+}
+
+function saveInChild(path: string, name: string, status: string) {
+  const child = spawn(
+    process.execPath,
+    ['--import', 'tsx', 'tests/fixtures/save-workflow.ts', path, name, status],
+    { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  let output = '';
+  let errors = '';
+  child.stdout.setEncoding('utf8').on('data', (chunk) => (output += chunk));
+  child.stderr.setEncoding('utf8').on('data', (chunk) => (errors += chunk));
+  return {
+    child,
+    result: once(child, 'exit').then(([code]) => ({ code, output: output.trim(), errors })),
+  };
+}
+
 describe('filesystem stores', () => {
   it('persists path-safe workflow and artifact identifiers across store instances', async () => {
     const path = await root();
@@ -87,6 +118,22 @@ describe('filesystem stores', () => {
     await expect(store.get('story/QE-42')).rejects.toThrow();
   });
 
+  it('rejects a valid record stored under a different identifier', async () => {
+    const path = await root();
+    const artifacts = new FileArtifactStore(path);
+    const workflows = new FileWorkflowStore(path);
+    await artifacts.put(artifact('actual-artifact'));
+    await workflows.create({ ...workflow(), id: 'actual-workflow' });
+    await writeFile(artifacts.pathFor('requested-artifact'), JSON.stringify(artifact('actual-artifact')));
+    await writeFile(
+      workflows.pathFor('requested-workflow'),
+      JSON.stringify({ ...workflow(), id: 'actual-workflow' }),
+    );
+
+    await expect(artifacts.get('requested-artifact')).rejects.toThrow(/requested-artifact/);
+    await expect(workflows.get('requested-workflow')).rejects.toThrow(/requested-workflow/);
+  });
+
   it('lists trace artifacts by createdAt then id', async () => {
     const store = new FileArtifactStore(await root());
     await store.put({ ...artifact('later'), createdAt: '2026-09-29T12:02:00.000Z' });
@@ -118,5 +165,107 @@ describe('filesystem stores', () => {
       reason: expect.any(ConcurrencyConflictError),
     });
     expect(await first.get(workflow().id)).toMatchObject({ version: 1 });
+  });
+
+  it('allows only one cross-process save for the same workflow version', async () => {
+    const path = await root();
+    const store = new FileWorkflowStore(path);
+    await store.create(workflow());
+    const first = saveInChild(path, 'first', 'running');
+    const second = saveInChild(path, 'second', 'waiting-for-human');
+    await Promise.all([
+      waitFor(join(path, 'ready-first')),
+      waitFor(join(path, 'ready-second')),
+    ]);
+
+    await writeFile(join(path, 'go'), 'go', 'utf8');
+    const results = await Promise.all([first.result, second.result]);
+
+    expect(results.map(({ output }) => output).sort()).toEqual([
+      'ConcurrencyConflictError',
+      'success',
+    ]);
+    expect(results.map(({ code }) => code)).toEqual([0, 0]);
+    expect(results.map(({ errors }) => errors)).toEqual(['', '']);
+    expect(await store.get(workflow().id)).toMatchObject({ version: 1 });
+  }, 20_000);
+
+  it('reclaims stale crashed locks without deleting a live owner lock', async () => {
+    const path = await root();
+    const store = new FileWorkflowStore(path);
+    await store.create(workflow());
+    const lockPath = `${store.pathFor(workflow().id)}.lock`;
+    const old = new Date(Date.now() - 60_000);
+    await mkdir(lockPath);
+    await writeFile(join(lockPath, 'owner.json'), '{interrupted', 'utf8');
+    await utimes(lockPath, old, old);
+    await expect(store.save({ ...workflow(), status: 'running' }, 0)).resolves.toMatchObject({
+      version: 1,
+    });
+
+    await mkdir(lockPath);
+    await writeFile(
+      join(lockPath, 'owner.json'),
+      JSON.stringify({ host: hostname(), pid: process.pid }),
+      'utf8',
+    );
+    await utimes(lockPath, old, old);
+    const pending = store.save(
+      { ...(await store.get(workflow().id))!, status: 'waiting-for-human' },
+      1,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(access(lockPath)).resolves.toBeUndefined();
+    await rm(lockPath, { recursive: true });
+    await expect(pending).resolves.toMatchObject({ version: 2 });
+  });
+
+  it('does not expose partial JSON while publishing a new artifact', async () => {
+    const path = await root();
+    const writer = new FileArtifactStore(path);
+    const reader = new FileArtifactStore(path);
+    const value = { ...artifact('large'), content: { payload: 'x'.repeat(20_000_000) } };
+    let settled = false;
+    let readError: unknown;
+    const pending = writer.put(value).finally(() => {
+      settled = true;
+    });
+
+    while (!settled) {
+      try {
+        await reader.get(value.id);
+      } catch (error) {
+        readError = error;
+        break;
+      }
+    }
+    await pending;
+
+    expect(readError).toBeUndefined();
+    expect(await reader.get(value.id)).toEqual(value);
+  }, 20_000);
+
+  it('leaves no final record when publication preparation fails', async () => {
+    const store = new FileArtifactStore(await root());
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    await expect(store.put({ ...artifact('retryable'), content: circular })).rejects.toThrow();
+    await expect(store.get('retryable')).resolves.toBeUndefined();
+    await expect(store.put(artifact('retryable'))).resolves.toBeUndefined();
+    expect(await store.get('retryable')).toEqual(artifact('retryable'));
+  });
+
+  it('keeps UTF-8 identifiers distinct when base64url differs only by case', async () => {
+    const store = new FileArtifactStore(await root());
+    const upperAlias = '\u0800';
+    const lowerAlias = '\u081A';
+
+    expect(store.pathFor(upperAlias).toLowerCase()).not.toBe(store.pathFor(lowerAlias).toLowerCase());
+    await store.put(artifact(upperAlias));
+    await store.put(artifact(lowerAlias));
+
+    expect((await store.get(upperAlias))?.id).toBe(upperAlias);
+    expect((await store.get(lowerAlias))?.id).toBe(lowerAlias);
   });
 });
