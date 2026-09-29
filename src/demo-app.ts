@@ -13,6 +13,11 @@ const page = `<!doctype html>
       <p role="status" hidden>Eligible</p>
       <p role="alert" hidden>Member ID is required</p>
       <section aria-label="No prior checks">No prior checks</section>
+      <table aria-label="Benefits"><tbody><tr><th>Plan</th><td>Standard</td></tr></tbody></table>
+      <ul aria-label="Checks"><li>Identity verified</li></ul>
+      <benefit-card></benefit-card>
+      <secure-card data-shadow-root="closed"></secure-card>
+      <iframe title="Details" srcdoc="<p>Member details</p>"></iframe>
       <button type="button" data-action="delete-history">Delete history</button>
     </main>
   </body>
@@ -33,6 +38,7 @@ export function createDemoServer(): Server {
       const input = document.querySelector('#member-id');
       const status = document.querySelector('[role=status]');
       const alert = document.querySelector('[role=alert]');
+      document.querySelector('benefit-card').attachShadow({ mode: 'open' }).innerHTML = '<button>View benefit</button>';
       form.addEventListener('submit', (event) => {
         event.preventDefault();
         const valid = input.value.trim() !== '';

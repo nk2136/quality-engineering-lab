@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { UiDiscoveryAgent, type UiBrowserSession } from '../src/ui-discovery.js';
+import { UiDiscoveryAgent, type UiBrowserSession, type UiStructureSnapshot } from '../src/ui-discovery.js';
 import { createPlaywrightSession, startDemoApp, type DemoApp } from './fixtures/demo-app.js';
 
 const traceId = '3d594650-3436-4d7c-86a7-2b94788009bc';
@@ -9,6 +9,16 @@ class FakeBrowser implements UiBrowserSession {
   fills: string[] = [];
   submits = 0;
   readonly counts = new Map<string, number>();
+  structure: UiStructureSnapshot = {
+    evidence: [
+      { id: 'table', kind: 'table', parentId: null, locator: 'getByRole(table)', role: 'table', name: 'Benefits', childCount: 1 },
+      { id: 'row', kind: 'row', parentId: 'table', locator: 'getByRole(row).nth(1)', role: 'row', name: null, childCount: 2 },
+      { id: 'list', kind: 'list', parentId: null, locator: 'getByRole(list)', role: 'list', name: 'Checks', childCount: 1 },
+      { id: 'shadow', kind: 'shadow-root', parentId: null, locator: 'custom-card', role: null, name: null, childCount: 1 },
+      { id: 'frame', kind: 'frame', parentId: null, locator: 'iframe[title="Details"]', role: null, name: 'Details', childCount: 1 },
+    ],
+    blockers: ['Closed shadow root at secure-card cannot be inspected.'],
+  };
 
   async open(): Promise<void> {
     this.opened = true;
@@ -19,6 +29,7 @@ class FakeBrowser implements UiBrowserSession {
   async accessibilitySnapshot(): Promise<string> { return `<main data-submit-count="${this.submits}" />`; }
   async locatorCount(locator: string): Promise<number> { return this.counts.get(locator) ?? 0; }
   async screenshot(): Promise<string> { return 'screenshot.png'; }
+  async inspectStructure() { return this.structure; }
   async close(): Promise<void> {}
 }
 
@@ -55,6 +66,19 @@ describe('UiDiscoveryAgent policy', () => {
 });
 
 describe('UiDiscoveryAgent evidence', () => {
+  it('returns scoped table, list, frame, and shadow-root evidence with blockers', async () => {
+    const agent = new UiDiscoveryAgent(() => new FakeBrowser());
+
+    const result = await agent.discover(request());
+
+    expect(result.structures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'row', parentId: 'table', kind: 'row' }),
+      expect.objectContaining({ id: 'shadow', kind: 'shadow-root' }),
+      expect.objectContaining({ id: 'frame', kind: 'frame' }),
+    ]));
+    expect(result.structuralBlockers).toContain('Closed shadow root at secure-card cannot be inspected.');
+  });
+
   it('prefers a unique role-and-name locator', async () => {
     const browser = new FakeBrowser();
     browser.counts.set('getByRole(button, { name: "Check eligibility" })', 1);
@@ -113,6 +137,19 @@ describe('UiDiscoveryAgent local browser', () => {
       'initial', 'empty', 'validation', 'success',
     ]);
     expect(result.performedActions).not.toContain('delete-history');
+  });
+
+  it('maps local table, list, frame, and open shadow-root relationships', async () => {
+    app = await startDemoApp();
+    const agent = new UiDiscoveryAgent(createPlaywrightSession);
+
+    const result = await agent.discover(request({ baseUrl: app.url }));
+
+    expect(result.structures.map(({ kind }) => kind)).toEqual(expect.arrayContaining([
+      'table', 'row', 'cell', 'list', 'list-item', 'frame', 'shadow-root',
+    ]));
+    expect(result.structures.find(({ kind }) => kind === 'row')?.parentId).not.toBeNull();
+    expect(result.structuralBlockers).toContain('Closed shadow root at secure-card cannot be inspected.');
   });
 
   it('blocks an external redirect before collecting evidence', async () => {

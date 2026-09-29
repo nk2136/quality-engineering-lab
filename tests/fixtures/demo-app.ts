@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from '@playwright/test';
 import { createDemoServer } from '../../src/demo-app.js';
 import type { UiBrowserSession } from '../../src/ui-discovery.js';
+import type { UiStructureSnapshot } from '../../src/ui-discovery.js';
 
 export interface DemoApp {
   readonly url: string;
@@ -58,6 +59,53 @@ class PlaywrightSession implements UiBrowserSession {
     const path = join(this.#screenshots ?? tmpdir(), `${name}.png`);
     await this.page.screenshot({ path });
     return path;
+  }
+
+  async inspectStructure(): Promise<UiStructureSnapshot> {
+    return this.page.evaluate<UiStructureSnapshot>(() => {
+      const elements = Array.from(document.querySelectorAll('table, tr, th, td, ul, ol, li, iframe'));
+      const ids = new Map<Element, string>();
+      const kind = (element: Element): UiStructureSnapshot['evidence'][number]['kind'] => {
+        const tag = element.tagName.toLowerCase();
+        if (tag === 'table') return 'table';
+        if (tag === 'tr') return 'row';
+        if (tag === 'th' || tag === 'td') return 'cell';
+        if (tag === 'ul' || tag === 'ol') return 'list';
+        if (tag === 'li') return 'list-item';
+        return 'frame';
+      };
+      const id = (element: Element) => {
+        const known = ids.get(element);
+        if (known) return known;
+        const value = `structure-${ids.size + 1}`;
+        ids.set(element, value);
+        return value;
+      };
+      const evidence = elements.map((element) => {
+        const label = element.getAttribute('aria-label') ?? element.getAttribute('title');
+        const parent = elements.find((candidate) => candidate.contains(element) && candidate !== element);
+        return {
+          id: id(element),
+          kind: kind(element),
+          parentId: parent ? id(parent) : null,
+          locator: label ? `${element.tagName.toLowerCase()}[aria-label="${label}"]` : element.tagName.toLowerCase(),
+          role: element.getAttribute('role'),
+          name: label,
+          childCount: element.children.length,
+        };
+      });
+      for (const host of Array.from(document.querySelectorAll('*')).filter((element) => element.shadowRoot)) {
+        evidence.push({
+          id: id(host), kind: 'shadow-root', parentId: null, locator: host.tagName.toLowerCase(),
+          role: null, name: null, childCount: host.shadowRoot?.children.length ?? 0,
+        });
+      }
+      return {
+        evidence,
+        blockers: Array.from(document.querySelectorAll('[data-shadow-root="closed"]'))
+          .map((element) => `Closed shadow root at ${element.tagName.toLowerCase()} cannot be inspected.`),
+      };
+    });
   }
 
   async close(): Promise<void> {

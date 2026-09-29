@@ -83,6 +83,8 @@ npm run test:ui
 
 UI Discovery is loopback-only and accepts no credentials. It may navigate, fill, and submit the local demo form, but it blocks destructive controls and all non-loopback browser requests.
 
+Its locator evidence is semantic-first (role/name, label, and stable test ID), with CSS treated as a lower-confidence fallback. Discovery records table/list hierarchy, frame scope, and open Shadow DOM relationships. Closed or otherwise opaque Shadow DOM is reported as a blocker; positional CSS and XPath are not emitted as durable locators.
+
 Run the small live calibration corpus only after configuring credentials and accepting provider usage:
 
 ```bash

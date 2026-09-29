@@ -23,16 +23,35 @@ export const UiObservationSchema = z.object({
   screenshotRef: z.string().min(1),
 });
 
+export const UiStructureEvidenceSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(['table', 'row', 'cell', 'list', 'list-item', 'frame', 'shadow-root', 'element']),
+  parentId: z.string().min(1).nullable(),
+  locator: z.string().min(1),
+  role: z.string().min(1).nullable(),
+  name: z.string().min(1).nullable(),
+  childCount: z.number().int().nonnegative(),
+});
+
+export const UiStructureSnapshotSchema = z.object({
+  evidence: z.array(UiStructureEvidenceSchema),
+  blockers: z.array(z.string()),
+});
+
 export const UiDiscoveryResultSchema = z.object({
   locators: z.array(UiLocatorEvidenceSchema),
   observations: z.array(UiObservationSchema),
   blockers: z.array(z.string()),
+  structures: z.array(UiStructureEvidenceSchema),
+  structuralBlockers: z.array(z.string()),
   performedActions: z.array(ActionSchema),
 });
 
 export type UiDiscoveryRequest = z.infer<typeof UiDiscoveryRequestSchema>;
 export type UiLocatorEvidence = z.infer<typeof UiLocatorEvidenceSchema>;
 export type UiObservation = z.infer<typeof UiObservationSchema>;
+export type UiStructureEvidence = z.infer<typeof UiStructureEvidenceSchema>;
+export type UiStructureSnapshot = z.infer<typeof UiStructureSnapshotSchema>;
 export type UiDiscoveryResult = z.infer<typeof UiDiscoveryResultSchema>;
 
 export interface UiBrowserSession {
@@ -42,6 +61,7 @@ export interface UiBrowserSession {
   accessibilitySnapshot(): Promise<string>;
   locatorCount(locator: string): Promise<number>;
   screenshot(name: string): Promise<string>;
+  inspectStructure(): Promise<UiStructureSnapshot>;
   close(): Promise<void>;
 }
 
@@ -100,6 +120,7 @@ export class UiDiscoveryAgent {
           locators.push({ locator, strategy, count: 1 });
         }
       }
+      const structure = UiStructureSnapshotSchema.parse(await session.inspectStructure());
 
       const observations = [await observe(session, 'initial'), await observe(session, 'empty')];
       const submitLocator = 'getByRole(button, { name: "Check eligibility" })';
@@ -119,6 +140,8 @@ export class UiDiscoveryAgent {
         locators,
         observations,
         blockers: locators.length === 0 ? ['No unique locator for Check eligibility.'] : [],
+        structures: structure.evidence,
+        structuralBlockers: structure.blockers,
         performedActions,
       };
     } finally {
