@@ -17,6 +17,7 @@
 - `src/ui-discovery.ts`: schemas, policy, browser boundary, locator ranking, evidence.
 - `tests/fixtures/demo-app.ts`: ephemeral server and Playwright adapter.
 - `tests/demo-app.test.ts`, `tests/ui-discovery.test.ts`: deterministic contract and browser tests.
+- `.github/workflows/ci.yml`: installs Chromium before the default suite runs.
 - `README.md`: local commands and safety boundary.
 
 ### Task 1: Create the local demo
@@ -77,6 +78,8 @@ Export Zod schemas and inferred `UiDiscoveryRequest`, `UiLocatorEvidence`, `UiOb
 ```ts
 export interface UiBrowserSession {
   open(url: string): Promise<void>;
+  fill(locator: string, value: string): Promise<void>;
+  submit(locator: string): Promise<void>;
   accessibilitySnapshot(): Promise<string>;
   locatorCount(locator: string): Promise<number>;
   screenshot(name: string): Promise<string>;
@@ -84,12 +87,14 @@ export interface UiBrowserSession {
 }
 ```
 
-Allow only `navigate`, `fill`, and `submit`; reject destructive and unknown actions before `open`. Close an opened session in `finally`.
+Allow only `navigate`, `fill`, and `submit`; reject destructive and unknown actions before `open`. Invoke `fill` and `submit` only after the matching action passes policy validation. Close an opened session in `finally`.
 
 - [ ] **Step 4: Verify green** — run `npx vitest run tests/ui-discovery.test.ts -t "route|destructive"`; expect pass without Chromium.
 - [ ] **Step 5: Commit** — `git add src/ui-discovery.ts tests/ui-discovery.test.ts; git commit -m "feat: define UI discovery policy contracts"`.
 
 ### Task 3: Add locator and UI-state evidence
+
+**Required interaction sequence:** After recording the initial form and empty state, call `submit('getByRole(button, { name: "Check eligibility" })')` to observe required-field validation. Then call `fill('getByLabel("Member ID")', 'MEMBER-42')` and submit the same button to observe success. The existing action allowlist must gate both methods.
 
 **Files:** Modify `src/ui-discovery.ts`, `tests/ui-discovery.test.ts`.
 
@@ -120,7 +125,18 @@ Rank candidate strategies exactly: role plus accessible name, associated label, 
 
 ### Task 4: Verify with local Chromium and document it
 
-**Files:** Modify `tests/fixtures/demo-app.ts`, `tests/ui-discovery.test.ts`, `README.md`.
+**Required loopback enforcement:** Before navigation, configure `page.route('**/*', handler)` to allow only `http:` requests to `localhost`, `127.0.0.1`, or `[::1]`, aborting every other request. After `page.goto`, reject discovery unless `page.url()` is also an allowed loopback URL. Add an acceptance test whose local route redirects to `https://example.invalid`, asserting discovery fails before any evidence is produced.
+
+The adapter implements `fill(locator, value)` with `page.locator(locator).fill(value)` and `submit(locator)` with `page.locator(locator).click()`.
+
+**Required CI change:** In the deterministic CI job, add `npx playwright install --with-deps chromium` after `npm ci` and before `npm run check`. The final Task 4 commit is:
+
+```powershell
+git add .github/workflows/ci.yml README.md package.json package-lock.json src/demo-app.ts src/ui-discovery.ts tests
+git commit -m "feat: add bounded UI discovery agent"
+```
+
+**Files:** Modify `.github/workflows/ci.yml`, `tests/fixtures/demo-app.ts`, `tests/ui-discovery.test.ts`, `README.md`.
 
 - [ ] **Step 1: Write the failing acceptance test**
 
