@@ -10,7 +10,7 @@ describe('local automation workflow acceptance', () => {
   it('does not generate a new patch when a pinned existing test already covers the scenario', async () => {
     const result = await runLocalAutomationWorkflow({
       traceId, scenario: { id: 'eligible', text: 'check eligibility', uiEvidence: true },
-      files: [{ path: 'tests/eligibility.spec.ts', revision, content: 'test("check eligibility", () => {})' }],
+      files: [{ path: 'tests/eligibility.spec.ts', revision, content: 'test("check eligibility", async () => { await expect(page.getByRole("button", { name: "Check eligibility" })).toBeVisible(); })' }],
       allowlistedPaths: ['tests/eligibility.spec.ts'],
     });
     expect(result).toMatchObject({ decision: 'reuse-existing-test', proposal: null });

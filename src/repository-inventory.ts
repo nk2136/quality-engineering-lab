@@ -50,6 +50,10 @@ function score(requirement: Set<string>, file: z.infer<typeof FileSchema>): numb
   return requirement.size === 0 ? 0 : matches / requirement.size;
 }
 
+function hasBehaviorEvidence(content: string): boolean {
+  return /\bexpect\s*\(|\bassert\b|\.(?:click|fill|goto|request)\s*\(/.test(content);
+}
+
 export class RepositoryCoverageAdvisor {
   advise(value: unknown): CoverageAdvice {
     const request = RepositoryCoverageRequestSchema.parse(value);
@@ -67,11 +71,16 @@ export class RepositoryCoverageAdvisor {
       return result;
     });
 
-    if (best !== undefined && best.score === 1) {
+    if (best !== undefined && best.score === 1 && hasBehaviorEvidence(best.file.content)) {
       return { decision: 'reuse-existing-test', targetPath: best.file.path, inventory,
         reasons: [`${best.file.path} covers every requirement token.`], blockers: [], warnings };
     }
     if (best !== undefined && best.score >= 0.5) {
+      if (!hasBehaviorEvidence(best.file.content)) {
+        return { decision: 'insufficient-evidence', targetPath: null, inventory,
+          reasons: [`${best.file.path} has requirement-word overlap but no exercised behavior evidence.`],
+          blockers: ['The highest-overlap test has no observable assertion or interaction evidence.'], warnings };
+      }
       return { decision: 'extend-existing-test', targetPath: best.file.path, inventory,
         reasons: [`${best.file.path} is the highest-overlap existing suite.`], blockers: [], warnings };
     }

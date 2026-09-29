@@ -73,6 +73,8 @@ function validateRequest(value: unknown): UiDiscoveryRequest {
   const request = UiDiscoveryRequestSchema.parse(value);
   const baseUrl = new URL(request.baseUrl);
   if (!isLoopback(baseUrl)) throw new Error('UI discovery requires a loopback http base URL.');
+  const startUrl = new URL(request.startPath, baseUrl);
+  if (!isLoopback(startUrl)) throw new Error('UI discovery start path must resolve to a loopback URL.');
   if (!request.routes.includes(request.startPath)) {
     throw new Error(`Start path '${request.startPath}' is not in the authorized route allowlist.`);
   }

@@ -1,5 +1,5 @@
 import type { AddressInfo } from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from '@playwright/test';
@@ -65,6 +65,7 @@ class PlaywrightSession implements UiBrowserSession {
     return this.page.evaluate<UiStructureSnapshot>(() => {
       const elements = Array.from(document.querySelectorAll('table, tr, th, td, ul, ol, li, iframe'));
       const ids = new Map<Element, string>();
+      const blockers: string[] = [];
       const kind = (element: Element): UiStructureSnapshot['evidence'][number]['kind'] => {
         const tag = element.tagName.toLowerCase();
         if (tag === 'table') return 'table';
@@ -81,6 +82,14 @@ class PlaywrightSession implements UiBrowserSession {
         ids.set(element, value);
         return value;
       };
+      const quote = (value: string) => value.replaceAll('"', '\\"');
+      const locator = (element: Element, scope?: string) => {
+        const tag = element.tagName.toLowerCase();
+        const label = element.getAttribute('aria-label') ?? element.getAttribute('title');
+        if (label) return `${tag}[${element.hasAttribute('aria-label') ? 'aria-label' : 'title'}="${quote(label)}"]`;
+        const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+        return text ? `${scope ? `${scope} >> ` : ''}${tag}:has-text("${quote(text)}")` : `${scope ? `${scope} >> ` : ''}${tag}`;
+      };
       const evidence = elements.map((element) => {
         const label = element.getAttribute('aria-label') ?? element.getAttribute('title');
         const parent = elements.find((candidate) => candidate.contains(element) && candidate !== element);
@@ -88,29 +97,51 @@ class PlaywrightSession implements UiBrowserSession {
           id: id(element),
           kind: kind(element),
           parentId: parent ? id(parent) : null,
-          locator: label ? `${element.tagName.toLowerCase()}[aria-label="${label}"]` : element.tagName.toLowerCase(),
+          locator: locator(element),
           role: element.getAttribute('role'),
           name: label,
           childCount: element.children.length,
         };
       });
       for (const host of Array.from(document.querySelectorAll('*')).filter((element) => element.shadowRoot)) {
+        const hostLocator = locator(host);
+        const hostId = id(host);
         evidence.push({
-          id: id(host), kind: 'shadow-root', parentId: null, locator: host.tagName.toLowerCase(),
+          id: hostId, kind: 'shadow-root', parentId: null, locator: hostLocator,
           role: null, name: null, childCount: host.shadowRoot?.children.length ?? 0,
         });
+        for (const child of Array.from(host.shadowRoot?.children ?? [])) {
+          evidence.push({
+            id: id(child), kind: 'element', parentId: hostId, locator: locator(child, hostLocator),
+            role: child.getAttribute('role'), name: child.getAttribute('aria-label'), childCount: child.children.length,
+          });
+        }
+      }
+      for (const frame of Array.from(document.querySelectorAll('iframe'))) {
+        const frameId = id(frame);
+        const frameLocator = locator(frame);
+        for (const child of Array.from(frame.contentDocument?.body.children ?? [])) {
+          evidence.push({
+            id: id(child), kind: 'element', parentId: frameId, locator: locator(child, `${frameLocator} >> frame`),
+            role: child.getAttribute('role'), name: child.getAttribute('aria-label'), childCount: child.children.length,
+          });
+        }
+      }
+      const seen = new Set<string>();
+      for (const item of evidence) {
+        if (seen.has(item.locator)) blockers.push(`Ambiguous structural locator '${item.locator}'.`);
+        seen.add(item.locator);
       }
       return {
         evidence,
-        blockers: Array.from(document.querySelectorAll('[data-shadow-root="closed"]'))
-          .map((element) => `Closed shadow root at ${element.tagName.toLowerCase()} cannot be inspected.`),
+        blockers: [...blockers, ...Array.from(document.querySelectorAll('[data-shadow-root="closed"]'))
+          .map((element) => `Closed shadow root at ${element.tagName.toLowerCase()} cannot be inspected.`)],
       };
     });
   }
 
   async close(): Promise<void> {
     await this.#browser?.close();
-    if (this.#screenshots) await rm(this.#screenshots, { recursive: true, force: true });
   }
 
   private get page(): Page {

@@ -1,3 +1,4 @@
+import { access, rm } from 'node:fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { UiDiscoveryAgent, type UiBrowserSession, type UiStructureSnapshot } from '../src/ui-discovery.js';
 import { createPlaywrightSession, startDemoApp, type DemoApp } from './fixtures/demo-app.js';
@@ -52,6 +53,16 @@ describe('UiDiscoveryAgent policy', () => {
     await expect(agent.discover(request({ startPath: '/admin' }))).rejects.toThrow(
       'not in the authorized route allowlist',
     );
+  });
+
+  it('rejects a protocol-relative start path before opening a browser session', async () => {
+    const browser = new FakeBrowser();
+    const agent = new UiDiscoveryAgent(() => browser);
+
+    await expect(agent.discover(request({
+      routes: ['//example.invalid/eligibility'], startPath: '//example.invalid/eligibility',
+    }))).rejects.toThrow('loopback');
+    expect(browser.opened).toBe(false);
   });
 
   it('rejects a destructive action before opening a browser session', async () => {
@@ -150,6 +161,23 @@ describe('UiDiscoveryAgent local browser', () => {
     ]));
     expect(result.structures.find(({ kind }) => kind === 'row')?.parentId).not.toBeNull();
     expect(result.structuralBlockers).toContain('Closed shadow root at secure-card cannot be inspected.');
+    expect(result.structures.filter(({ parentId }) => parentId !== null && result.structures.some(({ id }) => id === parentId))).not.toEqual([]);
+    expect(new Set(result.structures.map(({ locator }) => locator)).size).toBe(result.structures.length);
+    const frame = result.structures.find(({ kind }) => kind === 'frame');
+    const shadow = result.structures.find(({ kind }) => kind === 'shadow-root');
+    expect(result.structures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'element', parentId: frame?.id }),
+      expect.objectContaining({ kind: 'element', parentId: shadow?.id }),
+    ]));
+  });
+
+  it('retains discovery screenshots after the browser session closes', async () => {
+    app = await startDemoApp();
+    const result = await new UiDiscoveryAgent(createPlaywrightSession).discover(request({ baseUrl: app.url }));
+    const screenshots = result.observations.map(({ screenshotRef }) => screenshotRef);
+
+    await Promise.all(screenshots.map((path) => access(path)));
+    await Promise.all(screenshots.map((path) => rm(path, { force: true })));
   });
 
   it('blocks an external redirect before collecting evidence', async () => {

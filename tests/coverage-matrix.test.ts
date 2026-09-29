@@ -3,7 +3,7 @@ import { buildCoverageMatrix } from '../src/coverage-matrix.js';
 
 const revision = 'a'.repeat(40);
 const files = [
-  { path: 'tests/eligibility.spec.ts', revision, content: "test('checks member eligibility', async () => {})" },
+  { path: 'tests/eligibility.spec.ts', revision, content: "test('checks member eligibility', async () => { await page.getByLabel('Member ID').fill('MEMBER-42'); await expect(page.getByRole('button', { name: 'Check eligibility' })).toBeVisible(); })" },
   { path: 'src/pages/EligibilityPage.ts', revision, content: 'export class EligibilityPage {}' },
 ];
 

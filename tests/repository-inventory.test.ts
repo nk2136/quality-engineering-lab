@@ -3,7 +3,7 @@ import { RepositoryCoverageAdvisor } from '../src/repository-inventory.js';
 
 const revision = 'a'.repeat(40);
 const files = [
-  { path: 'tests/eligibility.spec.ts', revision, content: "test('checks member eligibility', async () => { await page.waitForTimeout(500); })" },
+  { path: 'tests/eligibility.spec.ts', revision, content: "test('checks member eligibility', async () => { await page.waitForTimeout(500); await expect(page.getByRole('heading', { name: 'Eligibility' })).toBeVisible(); })" },
   { path: 'src/pages/EligibilityPage.ts', revision, content: 'export class EligibilityPage {}' },
   { path: 'tests/fixtures/member.ts', revision, content: 'export const member = { id: "MEMBER-42" };' },
 ];
@@ -32,5 +32,15 @@ describe('RepositoryCoverageAdvisor', () => {
     const result = new RepositoryCoverageAdvisor().advise({ requirement: 'approve payroll export', files });
 
     expect(result).toMatchObject({ decision: 'insufficient-evidence', targetPath: null });
+  });
+
+  it('does not treat a test title or filename as proof of exercised coverage', () => {
+    const result = new RepositoryCoverageAdvisor().advise({
+      requirement: 'checks member eligibility',
+      files: [{ path: 'tests/eligibility.spec.ts', revision, content: "test('checks member eligibility', async () => {})" }],
+    });
+
+    expect(result).toMatchObject({ decision: 'insufficient-evidence', targetPath: null });
+    expect(result.blockers).toContain('The highest-overlap test has no observable assertion or interaction evidence.');
   });
 });
