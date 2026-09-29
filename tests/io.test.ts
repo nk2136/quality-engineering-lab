@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -33,5 +33,25 @@ describe('atomic JSON checkpoints', () => {
 
     expect(await readJson(path)).toEqual({ version: 2 });
     await expect(readFile(`${path}.tmp`, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('supports concurrent writes without corruption or temporary artifacts', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'qe-io-'));
+    directories.push(directory);
+    const path = join(directory, 'checkpoint.json');
+    const first = { version: 1, status: 'running', payload: 'first'.repeat(100_000) };
+    const second = { version: 2, status: 'complete', payload: 'second'.repeat(100_000) };
+
+    const results = await Promise.allSettled([
+      writeJsonAtomic(path, first),
+      writeJsonAtomic(path, second),
+    ]);
+
+    expect(results).toEqual([
+      { status: 'fulfilled', value: undefined },
+      { status: 'fulfilled', value: undefined },
+    ]);
+    expect([first, second]).toContainEqual(await readJson(path));
+    expect(await readdir(directory)).toEqual(['checkpoint.json']);
   });
 });
