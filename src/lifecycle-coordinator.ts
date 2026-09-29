@@ -40,6 +40,14 @@ const RunOptionsSchema = z.object({
 
 const HandoffArtifactIdsSchema = z.array(RecordIdSchema);
 
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
 const nextStage: Partial<Record<WorkflowStage, WorkflowStage>> = {
   refinement: 'planning',
   planning: 'implementation',
@@ -149,9 +157,22 @@ export class LifecycleCoordinator {
         await this.assertUnchangedRunning(running);
         let shouldRetry: boolean;
         try {
-          shouldRetry = z.boolean().parse(retryable(error));
+          const result: unknown = retryable(error);
+          if (isThenable(result)) {
+            try {
+              await result;
+            } catch (predicateRejection) {
+              throw new AggregateError([predicateRejection], 'Retry predicate rejected.', {
+                cause: error,
+              });
+            }
+          }
+          shouldRetry = z.boolean().parse(result);
         } catch (predicateError) {
           await this.settle(running, 'failed');
+          if (predicateError instanceof AggregateError && predicateError.cause === error) {
+            throw predicateError;
+          }
           throw this.withCause(predicateError, error);
         }
         if (!shouldRetry) {

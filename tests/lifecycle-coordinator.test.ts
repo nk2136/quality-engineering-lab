@@ -424,6 +424,53 @@ describe('LifecycleCoordinator', () => {
     },
   );
 
+  it('handles an asynchronously rejected retry predicate without a detached rejection', async () => {
+    const { coordinator: lifecycle } = coordinator();
+    await lifecycle.start({ id: 'STORY-42', traceId });
+    const handoffError = new Error('handoff failed');
+    const predicateError = new Error('predicate rejected');
+    const unhandled: unknown[] = [];
+    const onUnhandled = (error: unknown) => unhandled.push(error);
+    process.on('unhandledRejection', onUnhandled);
+    let attempts = 0;
+
+    try {
+      let thrown: unknown;
+      try {
+        await lifecycle.run(
+          'STORY-42',
+          'planning',
+          async () => {
+            attempts += 1;
+            throw handoffError;
+          },
+          {
+            maxAttempts: 3,
+            retryable: (async () => {
+              throw predicateError;
+            }) as never,
+          },
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(attempts).toBe(1);
+      expect(thrown).toBeInstanceOf(AggregateError);
+      expect((thrown as AggregateError).errors).toContain(predicateError);
+      expect((thrown as Error).cause).toBe(handoffError);
+      expect(unhandled).toEqual([]);
+      await expect(lifecycle.resume('STORY-42')).resolves.toMatchObject({
+        stage: 'refinement',
+        status: 'failed',
+        version: 2,
+      });
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('rethrows a non-retryable failure and persists failed state without losing artifacts', async () => {
     const store = new InMemoryWorkflowStore();
     await store.create(state({ artifactIds: ['existing'] }));
