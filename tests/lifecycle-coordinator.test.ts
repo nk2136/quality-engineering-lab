@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ConcurrencyConflictError,
   DuplicateRecordError,
@@ -9,6 +12,7 @@ import {
   type WorkflowStore,
 } from '../src/contracts.js';
 import { InMemoryWorkflowStore } from '../src/in-memory-stores.js';
+import { FileWorkflowStore } from '../src/filesystem-stores.js';
 import { LifecycleCoordinator } from '../src/lifecycle-coordinator.js';
 
 const traceId = '3d594650-3436-4d7c-86a7-2b94788009bc';
@@ -128,6 +132,25 @@ describe('LifecycleCoordinator', () => {
     const checkpoint = await first.transition('STORY-42', 'planning');
 
     await expect(new LifecycleCoordinator(store).resume('STORY-42')).resolves.toEqual(checkpoint);
+  });
+
+  it('persists lifecycle state across coordinator restarts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-agents-lifecycle-'));
+    try {
+      const first = new LifecycleCoordinator(new FileWorkflowStore(root), () => firstTime);
+      await first.start({ id: 'STORY-42', traceId });
+      const checkpoint = await first.transition('STORY-42', 'planning');
+
+      const second = new LifecycleCoordinator(new FileWorkflowStore(root), () => secondTime);
+      await expect(second.resume('STORY-42')).resolves.toEqual(checkpoint);
+      const cancelled = await second.cancel('STORY-42');
+
+      const third = new LifecycleCoordinator(new FileWorkflowStore(root));
+      await expect(third.resume('STORY-42')).resolves.toEqual(cancelled);
+      expect(cancelled).toMatchObject({ status: 'cancelled', version: 2 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('validates resume ids and reports missing workflows clearly', async () => {
