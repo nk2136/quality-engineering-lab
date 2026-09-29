@@ -149,7 +149,7 @@ export class LifecycleCoordinator {
         await this.assertUnchangedRunning(running);
         let shouldRetry: boolean;
         try {
-          shouldRetry = retryable(error);
+          shouldRetry = z.boolean().parse(retryable(error));
         } catch (predicateError) {
           await this.settle(running, 'failed');
           throw this.withCause(predicateError, error);

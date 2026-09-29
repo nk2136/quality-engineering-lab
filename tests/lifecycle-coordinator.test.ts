@@ -387,6 +387,43 @@ describe('LifecycleCoordinator', () => {
     });
   });
 
+  it.each([
+    ['async false', async () => false],
+    ['string yes', () => 'yes'],
+  ])(
+    'rejects a non-boolean %s retry predicate result and settles failed',
+    async (_label, retryable) => {
+      const { coordinator: lifecycle } = coordinator();
+      await lifecycle.start({ id: 'STORY-42', traceId });
+      const handoffError = new Error('handoff failed');
+      let attempts = 0;
+      let thrown: unknown;
+
+      try {
+        await lifecycle.run(
+          'STORY-42',
+          'planning',
+          async () => {
+            attempts += 1;
+            throw handoffError;
+          },
+          { maxAttempts: 3, retryable: retryable as never },
+        );
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(attempts).toBe(1);
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).cause).toBe(handoffError);
+      await expect(lifecycle.resume('STORY-42')).resolves.toMatchObject({
+        stage: 'refinement',
+        status: 'failed',
+        version: 2,
+      });
+    },
+  );
+
   it('rethrows a non-retryable failure and persists failed state without losing artifacts', async () => {
     const store = new InMemoryWorkflowStore();
     await store.create(state({ artifactIds: ['existing'] }));
