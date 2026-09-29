@@ -35,23 +35,38 @@ describe('atomic JSON checkpoints', () => {
     await expect(readFile(`${path}.tmp`, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('supports concurrent writes without corruption or temporary artifacts', async () => {
+  it('serializes concurrent writes without corruption or temporary artifacts', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'qe-io-'));
     directories.push(directory);
     const path = join(directory, 'checkpoint.json');
-    const first = { version: 1, status: 'running', payload: 'first'.repeat(100_000) };
-    const second = { version: 2, status: 'complete', payload: 'second'.repeat(100_000) };
+    const checkpoints = Array.from({ length: 25 }, (_, version) => ({
+      version,
+      status: `status-${version}`,
+      payload: `payload-${version}`.repeat(100_000),
+    }));
 
-    const results = await Promise.allSettled([
-      writeJsonAtomic(path, first),
-      writeJsonAtomic(path, second),
-    ]);
+    const results = await Promise.all(
+      checkpoints.map((checkpoint) => writeJsonAtomic(path, checkpoint)),
+    );
 
-    expect(results).toEqual([
-      { status: 'fulfilled', value: undefined },
-      { status: 'fulfilled', value: undefined },
-    ]);
-    expect([first, second]).toContainEqual(await readJson(path));
+    expect(results).toHaveLength(checkpoints.length);
+    expect(checkpoints).toContainEqual(await readJson(path));
+    expect(await readdir(directory)).toEqual(['checkpoint.json']);
+  });
+
+  it('continues queued writes after a prior write rejects', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'qe-io-'));
+    directories.push(directory);
+    const path = join(directory, 'checkpoint.json');
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+
+    const failed = writeJsonAtomic(path, circular);
+    const successful = writeJsonAtomic(path, { version: 2, status: 'complete' });
+
+    await expect(failed).rejects.toThrow();
+    await expect(successful).resolves.toBeUndefined();
+    expect(await readJson(path)).toEqual({ version: 2, status: 'complete' });
     expect(await readdir(directory)).toEqual(['checkpoint.json']);
   });
 });
