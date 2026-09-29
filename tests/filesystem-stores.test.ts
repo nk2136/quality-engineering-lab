@@ -239,9 +239,8 @@ describe('filesystem stores', () => {
     const ownerPath = join(lockPath, 'owner.json');
     await mkdir(lockPath);
     const renew = async () => {
-      const temporaryPath = `${ownerPath}.renew`;
       await writeFile(
-        temporaryPath,
+        ownerPath,
         JSON.stringify({
           token: 'renewing-owner',
           createdAt: new Date().toISOString(),
@@ -249,10 +248,14 @@ describe('filesystem stores', () => {
         }),
         'utf8',
       );
-      await rename(temporaryPath, ownerPath);
+      const now = new Date();
+      await utimes(lockPath, now, now);
     };
     await renew();
-    const heartbeat = setInterval(() => void renew(), 10);
+    let renewal = Promise.resolve();
+    const heartbeat = setInterval(() => {
+      renewal = renewal.then(renew);
+    }, 10);
 
     const pending = store
       .save({ ...workflow(), status: 'running' }, 0)
@@ -262,6 +265,7 @@ describe('filesystem stores', () => {
       new Promise<'still-pending'>((resolve) => setTimeout(() => resolve('still-pending'), 150)),
     ]);
     clearInterval(heartbeat);
+    await renewal;
     expect(JSON.parse(await readFile(ownerPath, 'utf8')).token).toBe('renewing-owner');
     await rm(lockPath, { recursive: true, force: true });
     await pending;
@@ -343,5 +347,20 @@ describe('filesystem stores', () => {
 
     expect((await store.get(upperAlias))?.id).toBe(upperAlias);
     expect((await store.get(lowerAlias))?.id).toBe(lowerAlias);
+  });
+
+  it('persists exactly 104-byte multibyte identifiers in both stores', async () => {
+    const path = await root();
+    const id = 'é'.repeat(52);
+    const artifacts = new FileArtifactStore(path);
+    const workflows = new FileWorkflowStore(path);
+
+    await artifacts.put(artifact(id));
+    await workflows.create({ ...workflow(), id });
+    const saved = await workflows.save({ ...workflow(), id, status: 'running' }, 0);
+
+    expect(await artifacts.get(id)).toEqual(artifact(id));
+    expect(saved).toMatchObject({ id, status: 'running', version: 1 });
+    expect(await workflows.get(id)).toEqual(saved);
   });
 });

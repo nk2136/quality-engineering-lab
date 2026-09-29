@@ -4,12 +4,12 @@ import { QaPlanSchema, TestCaseSchema } from '../src/schemas.js';
 
 describe('quality contracts', () => {
   it('accepts bounded Unicode record identifiers', () => {
-    expect(RecordIdSchema.safeParse('é'.repeat(60)).success).toBe(true);
+    expect(RecordIdSchema.safeParse('é'.repeat(52)).success).toBe(true);
     expect(RecordIdSchema.safeParse('\u0800').success).toBe(true);
   });
 
-  it('rejects unpaired surrogates and identifiers over 120 UTF-8 bytes', () => {
-    for (const id of ['\uD800', '\uDC00', 'é'.repeat(61)]) {
+  it('rejects unpaired surrogates and identifiers over 104 UTF-8 bytes', () => {
+    for (const id of ['\uD800', '\uDC00', 'a'.repeat(105)]) {
       expect(RecordIdSchema.safeParse(id).success).toBe(false);
     }
   });
@@ -31,7 +31,7 @@ describe('quality contracts', () => {
       status: 'pending',
       version: 0,
       updatedAt: artifact.createdAt,
-      artifactIds: ['é'.repeat(61)],
+      artifactIds: ['a'.repeat(105)],
       approval: { status: 'pending', reviewer: null, reviewedAt: null },
     };
 
