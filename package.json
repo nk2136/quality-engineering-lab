@@ -10,7 +10,9 @@
     "eval:live": "tsx evals/run-live-evals.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "demo": "tsx src/demo-app.ts",
+    "test:ui": "vitest run tests/ui-discovery.test.ts"
   },
   "engines": {
     "node": ">=22"
@@ -20,6 +22,7 @@
     "zod": "4.1.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@types/node": "22.15.30",
     "tsx": "4.20.5",
     "typescript": "5.9.2",

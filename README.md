@@ -4,7 +4,7 @@
 
 A TypeScript project building toward an evidence-driven SDET platform: understand stories and existing code, identify missing coverage, reuse automation components, and hand work between specialized agents under human control.
 
-**Current scope:** working QA-plan and supplied-evidence triage commands, plus library-level Story Readiness and context-retrieval foundations. Executable test generation, durable cross-agent recovery, database querying, and the full story-to-execution workflow are not implemented yet. Model output is never automatically trustworthy.
+**Current scope:** a local, deterministic story-to-tested-automation vertical slice. It collects bounded UI and repository evidence, chooses reuse or new coverage, validates and independently reviews a mock-model patch, requires a hash-bound human approval before a disposable local execution, and emits evidence/reporting primitives. Model output is never automatically trustworthy.
 
 ## The first working system
 
@@ -74,6 +74,17 @@ Validate locally:
 npm run check
 ```
 
+Run the local UI Discovery demo and its browser acceptance tests:
+
+```bash
+npm run demo
+npm run test:ui
+```
+
+UI Discovery is loopback-only and accepts no credentials. It may navigate, fill, and submit the local demo form, but it blocks destructive controls and all non-loopback browser requests.
+
+Its locator evidence is semantic-first (role/name, label, and stable test ID), with CSS treated as a lower-confidence fallback. Discovery records table/list hierarchy, frame scope, and open Shadow DOM relationships. Closed or otherwise opaque Shadow DOM is reported as a blocker; positional CSS and XPath are not emitted as durable locators.
+
 Run the small live calibration corpus only after configuring credentials and accepting provider usage:
 
 ```bash
@@ -81,6 +92,14 @@ npm run eval:live
 ```
 
 The CLI currently exposes `plan` and `triage`, not a Story Readiness command. Story Readiness is exercised through its library API and mocked end-to-end tests. The existing approval command approves a QA-plan artifact; it is not yet a durable lifecycle approval/resume service. Never commit API keys or pass credentials into model-visible context.
+
+Run the deterministic workflow with an input JSON object containing `traceId`, `scenario`, pinned `files`, `allowlistedPaths`, and `mockDiff`:
+
+```bash
+npm run agent -- workflow --input artifacts/workflow-input.json
+```
+
+This command does not call a provider and does not execute a patch. It can return an existing-coverage decision or a policy-clean proposal awaiting a separate hash-bound human approval. The local executor copies a supplied fixture to a temporary directory, uses `git apply` and argument-array commands, and passes an allowlisted environment. It is a contamination guard, not a production security sandbox.
 
 ### Durable workflow checkpoints
 
@@ -99,6 +118,15 @@ src/lifecycle-coordinator.ts  deterministic lifecycle transitions and recovery
 src/story-readiness-workflow.ts  context-to-assessment library workflow
 src/jira-cloud.ts         read-only Jira issue knowledge adapter
 src/github-repository.ts  pinned, allowlisted repository knowledge adapter
+src/repository-inventory.ts deterministic coverage placement advisor
+src/coverage-matrix.ts    scenario-to-coverage decision matrix
+src/patch-workflow.ts     bounded mock-model proposal, policy validation, and independent review
+src/patch-approval.ts     hash-bound human approval validation
+src/local-executor.ts     disposable-copy local patch executor and output capture
+src/execution-triage.ts   deterministic execution failure classification
+src/extended-analysis.ts  deterministic OpenAPI, database, CI, telemetry, flaky, defect, and risk helpers
+src/evidence-report.ts    read-only traceability reports with no release authority
+src/local-workflow.ts     local coverage-to-proposal orchestration
 src/knowledge-assembler.ts source-specific context routing and assembly
 src/schemas.ts            typed output contracts
 src/approve.ts            human-review gate
@@ -116,12 +144,12 @@ tests/schemas.test.ts     deterministic contract tests
 The two-week sprint targets September 25, 2026. This is a delivery target, not a claim of completion or universal database/framework support. The scope is one pinned TypeScript/Playwright repository and a disposable local demo application. This sequence refines the broader phases in [Architecture decisions](docs/AI_ENGINEERING_LANDSCAPE.md).
 
 - [x] Add a deterministic lifecycle coordinator with durable checkpoints, structured artifact handoffs, idempotency, bounded retries, cancellation, and crash recovery.
-- [ ] Inventory existing tests, assertions, fixtures, helpers, page objects, and API clients at a pinned revision.
-- [ ] Map acceptance criteria to evidence and decide: reuse coverage, extend a test, create a missing test, or stop for insufficient evidence.
-- [ ] Connect context and coverage reasoning through a concrete `ModelGateway` and a runnable CLI, keeping offline fixtures clearly separate from real-model results.
-- [ ] Generate bounded Playwright patches that reuse existing framework components; validate policy, compilation, and independent review.
-- [ ] Bind human approval to the exact patch and inputs, then execute only in an isolated worker against the disposable demo.
-- [ ] Publish evidence-linked reports and repeatable end-to-end evaluations, including a test that detects an intentionally introduced demo defect.
+- [x] Inventory existing tests, assertions, fixtures, helpers, page objects, and API clients at a pinned revision.
+- [x] Map acceptance criteria to evidence and decide: reuse coverage, extend a test, create a missing test, or stop for insufficient evidence.
+- [x] Connect context and coverage reasoning through a deterministic `ModelGateway` and runnable offline CLI workflow.
+- [x] Generate bounded Playwright patch proposals, validate policy, and independently review them before approval.
+- [x] Bind human approval to the exact patch and inputs, then execute only in a disposable local worker.
+- [x] Publish evidence-linked report primitives and deterministic end-to-end acceptance coverage for reuse and new-coverage paths.
 
 ### Planned automatic handoffs
 
@@ -152,7 +180,7 @@ Required acceptance cases include no new test for already-covered behavior, no g
 ### Safety and evidence boundaries
 
 - Retrieved stories, repository content, and generated code are untrusted data, not permission to expand tool access.
-- Generated code must not run on the coordinator host or with production credentials. If isolation is unavailable, stop at static validation.
+- Generated code must not run with production credentials. The current disposable-copy executor is suitable only for local fixtures; sensitive or production work requires a stronger isolated executor.
 - Live databases, live Jira writes, production systems, secrets, deployment settings, and branch protections are outside the development sprint's authorization.
 - Database read-only access alone is insufficient: future adapters need allowlists, sensitive-data filtering, query limits, timeouts, and audit records.
 - Coverage overlap can be intentional across test layers. Measure unnecessary duplication and missed gaps instead of claiming zero duplication.
