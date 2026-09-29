@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access, mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -349,18 +349,26 @@ describe('filesystem stores', () => {
     expect((await store.get(lowerAlias))?.id).toBe(lowerAlias);
   });
 
-  it('persists exactly 104-byte multibyte identifiers in both stores', async () => {
+  it('persists and releases exactly 100-byte multibyte identifiers in both stores', async () => {
     const path = await root();
-    const id = 'é'.repeat(52);
+    const id = 'é'.repeat(50);
     const artifacts = new FileArtifactStore(path);
     const workflows = new FileWorkflowStore(path);
 
     await artifacts.put(artifact(id));
     await workflows.create({ ...workflow(), id });
-    const saved = await workflows.save({ ...workflow(), id, status: 'running' }, 0);
+    const first = await workflows.save({ ...workflow(), id, status: 'running' }, 0);
+    const second = await workflows.save(
+      { ...first, status: 'waiting-for-human' },
+      1,
+    );
 
     expect(await artifacts.get(id)).toEqual(artifact(id));
-    expect(saved).toMatchObject({ id, status: 'running', version: 1 });
-    expect(await workflows.get(id)).toEqual(saved);
+    expect(first).toMatchObject({ id, status: 'running', version: 1 });
+    expect(second).toMatchObject({ id, status: 'waiting-for-human', version: 2 });
+    expect(await workflows.get(id)).toEqual(second);
+    expect(await readdir(join(path, 'workflows'))).toEqual([
+      `${Buffer.from(id, 'utf8').toString('hex')}.json`,
+    ]);
   });
 });

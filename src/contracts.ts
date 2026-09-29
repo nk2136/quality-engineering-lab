@@ -91,8 +91,8 @@ export const RecordIdSchema = z
   .min(1)
   .refine(hasPairedSurrogates, 'Record identifiers cannot contain unpaired UTF-16 surrogates.')
   .refine(
-    (value) => Buffer.byteLength(value, 'utf8') <= 104,
-    'Record identifiers exceed 104 UTF-8 bytes.',
+    (value) => Buffer.byteLength(value, 'utf8') <= 100,
+    'Record identifiers exceed 100 UTF-8 bytes.',
   );
 
 export const ArtifactRecordSchema = z.object({
