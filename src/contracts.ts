@@ -125,7 +125,15 @@ export const WorkflowStateSchema = z.object({
     'release',
     'production',
   ]),
-  status: z.enum(['pending', 'running', 'waiting-for-human', 'completed', 'failed', 'cancelled']),
+  status: z.enum([
+    'pending',
+    'running',
+    'waiting-for-human',
+    'blocked',
+    'completed',
+    'failed',
+    'cancelled',
+  ]),
   version: z.number().int().nonnegative(),
   updatedAt: z.string().datetime(),
   artifactIds: z.array(RecordIdSchema),
@@ -148,6 +156,27 @@ export interface WorkflowTransition {
   from: WorkflowStage;
   to: WorkflowStage;
   requiresHumanApproval: boolean;
+}
+
+export class InvalidTransitionError extends Error {
+  constructor(from: WorkflowStage, to: WorkflowStage) {
+    super(`Workflow cannot transition from '${from}' to '${to}'.`);
+    this.name = 'InvalidTransitionError';
+  }
+}
+
+export class WorkflowCancelledError extends Error {
+  constructor(id: string) {
+    super(`Workflow '${id}' was cancelled.`);
+    this.name = 'WorkflowCancelledError';
+  }
+}
+
+export class RetryExhaustedError extends Error {
+  constructor(id: string, attempts: number, options?: ErrorOptions) {
+    super(`Workflow '${id}' exhausted ${attempts} attempts.`, options);
+    this.name = 'RetryExhaustedError';
+  }
 }
 
 export class DuplicateRecordError extends Error {
