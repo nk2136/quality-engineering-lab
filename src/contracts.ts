@@ -72,8 +72,31 @@ export const ArtifactKindSchema = z.enum([
   'failure-triage',
 ]);
 
+function hasPairedSurrogates(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export const RecordIdSchema = z
+  .string()
+  .min(1)
+  .refine(hasPairedSurrogates, 'Record identifiers cannot contain unpaired UTF-16 surrogates.')
+  .refine(
+    (value) => Buffer.byteLength(value, 'utf8') <= 100,
+    'Record identifiers exceed 100 UTF-8 bytes.',
+  );
+
 export const ArtifactRecordSchema = z.object({
-  id: z.string().min(1),
+  id: RecordIdSchema,
   traceId: z.string().uuid(),
   kind: ArtifactKindSchema,
   schemaVersion: z.string().min(1),
@@ -91,7 +114,7 @@ export interface ArtifactStore {
 }
 
 export const WorkflowStateSchema = z.object({
-  id: z.string().min(1),
+  id: RecordIdSchema,
   traceId: z.string().uuid(),
   stage: z.enum([
     'refinement',
@@ -102,10 +125,18 @@ export const WorkflowStateSchema = z.object({
     'release',
     'production',
   ]),
-  status: z.enum(['pending', 'running', 'waiting-for-human', 'completed', 'failed', 'cancelled']),
+  status: z.enum([
+    'pending',
+    'running',
+    'waiting-for-human',
+    'blocked',
+    'completed',
+    'failed',
+    'cancelled',
+  ]),
   version: z.number().int().nonnegative(),
   updatedAt: z.string().datetime(),
-  artifactIds: z.array(z.string().min(1)),
+  artifactIds: z.array(RecordIdSchema),
   approval: z.object({
     status: z.enum(['not-required', 'pending', 'approved', 'rejected']),
     reviewer: z.string().min(1).nullable(),
@@ -125,6 +156,27 @@ export interface WorkflowTransition {
   from: WorkflowStage;
   to: WorkflowStage;
   requiresHumanApproval: boolean;
+}
+
+export class InvalidTransitionError extends Error {
+  constructor(from: WorkflowStage, to: WorkflowStage) {
+    super(`Workflow cannot transition from '${from}' to '${to}'.`);
+    this.name = 'InvalidTransitionError';
+  }
+}
+
+export class WorkflowCancelledError extends Error {
+  constructor(id: string) {
+    super(`Workflow '${id}' was cancelled.`);
+    this.name = 'WorkflowCancelledError';
+  }
+}
+
+export class RetryExhaustedError extends Error {
+  constructor(id: string, attempts: number, options?: ErrorOptions) {
+    super(`Workflow '${id}' exhausted ${attempts} attempts.`, options);
+    this.name = 'RetryExhaustedError';
+  }
 }
 
 export class DuplicateRecordError extends Error {
