@@ -110,6 +110,7 @@ src/lifecycle-coordinator.ts  deterministic lifecycle transitions and recovery
 src/story-readiness-workflow.ts  context-to-assessment library workflow
 src/jira-cloud.ts         read-only Jira issue knowledge adapter
 src/github-repository.ts  pinned, allowlisted repository knowledge adapter
+src/repository-inventory.ts deterministic coverage placement advisor
 src/knowledge-assembler.ts source-specific context routing and assembly
 src/schemas.ts            typed output contracts
 src/approve.ts            human-review gate
@@ -127,7 +128,7 @@ tests/schemas.test.ts     deterministic contract tests
 The two-week sprint targets September 25, 2026. This is a delivery target, not a claim of completion or universal database/framework support. The scope is one pinned TypeScript/Playwright repository and a disposable local demo application. This sequence refines the broader phases in [Architecture decisions](docs/AI_ENGINEERING_LANDSCAPE.md).
 
 - [x] Add a deterministic lifecycle coordinator with durable checkpoints, structured artifact handoffs, idempotency, bounded retries, cancellation, and crash recovery.
-- [ ] Inventory existing tests, assertions, fixtures, helpers, page objects, and API clients at a pinned revision.
+- [x] Inventory existing tests, assertions, fixtures, helpers, page objects, and API clients at a pinned revision.
 - [ ] Map acceptance criteria to evidence and decide: reuse coverage, extend a test, create a missing test, or stop for insufficient evidence.
 - [ ] Connect context and coverage reasoning through a concrete `ModelGateway` and a runnable CLI, keeping offline fixtures clearly separate from real-model results.
 - [ ] Generate bounded Playwright patches that reuse existing framework components; validate policy, compilation, and independent review.
