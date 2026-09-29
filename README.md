@@ -111,6 +111,7 @@ src/story-readiness-workflow.ts  context-to-assessment library workflow
 src/jira-cloud.ts         read-only Jira issue knowledge adapter
 src/github-repository.ts  pinned, allowlisted repository knowledge adapter
 src/repository-inventory.ts deterministic coverage placement advisor
+src/coverage-matrix.ts    scenario-to-coverage decision matrix
 src/knowledge-assembler.ts source-specific context routing and assembly
 src/schemas.ts            typed output contracts
 src/approve.ts            human-review gate
@@ -129,7 +130,7 @@ The two-week sprint targets September 25, 2026. This is a delivery target, not a
 
 - [x] Add a deterministic lifecycle coordinator with durable checkpoints, structured artifact handoffs, idempotency, bounded retries, cancellation, and crash recovery.
 - [x] Inventory existing tests, assertions, fixtures, helpers, page objects, and API clients at a pinned revision.
-- [ ] Map acceptance criteria to evidence and decide: reuse coverage, extend a test, create a missing test, or stop for insufficient evidence.
+- [x] Map acceptance criteria to evidence and decide: reuse coverage, extend a test, create a missing test, or stop for insufficient evidence.
 - [ ] Connect context and coverage reasoning through a concrete `ModelGateway` and a runnable CLI, keeping offline fixtures clearly separate from real-model results.
 - [ ] Generate bounded Playwright patches that reuse existing framework components; validate policy, compilation, and independent review.
 - [ ] Bind human approval to the exact patch and inputs, then execute only in an isolated worker against the disposable demo.
