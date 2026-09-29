@@ -72,8 +72,31 @@ export const ArtifactKindSchema = z.enum([
   'failure-triage',
 ]);
 
+function hasPairedSurrogates(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export const RecordIdSchema = z
+  .string()
+  .min(1)
+  .refine(hasPairedSurrogates, 'Record identifiers cannot contain unpaired UTF-16 surrogates.')
+  .refine(
+    (value) => Buffer.byteLength(value, 'utf8') <= 120,
+    'Record identifiers exceed 120 UTF-8 bytes.',
+  );
+
 export const ArtifactRecordSchema = z.object({
-  id: z.string().min(1),
+  id: RecordIdSchema,
   traceId: z.string().uuid(),
   kind: ArtifactKindSchema,
   schemaVersion: z.string().min(1),
@@ -91,7 +114,7 @@ export interface ArtifactStore {
 }
 
 export const WorkflowStateSchema = z.object({
-  id: z.string().min(1),
+  id: RecordIdSchema,
   traceId: z.string().uuid(),
   stage: z.enum([
     'refinement',
@@ -105,7 +128,7 @@ export const WorkflowStateSchema = z.object({
   status: z.enum(['pending', 'running', 'waiting-for-human', 'completed', 'failed', 'cancelled']),
   version: z.number().int().nonnegative(),
   updatedAt: z.string().datetime(),
-  artifactIds: z.array(z.string().min(1)),
+  artifactIds: z.array(RecordIdSchema),
   approval: z.object({
     status: z.enum(['not-required', 'pending', 'approved', 'rejected']),
     reviewer: z.string().min(1).nullable(),

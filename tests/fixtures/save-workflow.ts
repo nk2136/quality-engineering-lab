@@ -15,7 +15,7 @@ const state: WorkflowState = {
   status,
   version: 0,
   updatedAt: '2026-09-29T12:00:00.000Z',
-  artifactIds: Array.from({ length: 100_000 }, (_, index) => `artifact-${index}`),
+  artifactIds: Array.from({ length: 300_000 }, (_, index) => `artifact-${index}`),
   approval: { status: 'pending', reviewer: null, reviewedAt: null },
 };
 
@@ -33,5 +33,7 @@ try {
   await new FileWorkflowStore(root).save(state, 0);
   process.stdout.write('success');
 } catch (error) {
-  process.stdout.write(error instanceof Error ? error.name : 'unknown');
+  process.stdout.write(
+    error instanceof Error ? (error.name === 'Error' ? error.message : error.name) : 'unknown',
+  );
 }

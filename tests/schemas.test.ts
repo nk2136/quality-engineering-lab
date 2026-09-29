@@ -1,7 +1,44 @@
 import { describe, expect, it } from 'vitest';
+import { ArtifactRecordSchema, RecordIdSchema, WorkflowStateSchema } from '../src/contracts.js';
 import { QaPlanSchema, TestCaseSchema } from '../src/schemas.js';
 
 describe('quality contracts', () => {
+  it('accepts bounded Unicode record identifiers', () => {
+    expect(RecordIdSchema.safeParse('é'.repeat(60)).success).toBe(true);
+    expect(RecordIdSchema.safeParse('\u0800').success).toBe(true);
+  });
+
+  it('rejects unpaired surrogates and identifiers over 120 UTF-8 bytes', () => {
+    for (const id of ['\uD800', '\uDC00', 'é'.repeat(61)]) {
+      expect(RecordIdSchema.safeParse(id).success).toBe(false);
+    }
+  });
+
+  it('applies record identifier validation to records and workflow artifact references', () => {
+    const artifact = {
+      id: '\uD800',
+      traceId: '3d594650-3436-4d7c-86a7-2b94788009bc',
+      kind: 'context-pack',
+      schemaVersion: '1.0',
+      createdAt: '2026-09-29T12:00:00.000Z',
+      content: {},
+      metadata: {},
+    };
+    const workflow = {
+      id: 'story/QE-42',
+      traceId: artifact.traceId,
+      stage: 'refinement',
+      status: 'pending',
+      version: 0,
+      updatedAt: artifact.createdAt,
+      artifactIds: ['é'.repeat(61)],
+      approval: { status: 'pending', reviewer: null, reviewedAt: null },
+    };
+
+    expect(ArtifactRecordSchema.safeParse(artifact).success).toBe(false);
+    expect(WorkflowStateSchema.safeParse(workflow).success).toBe(false);
+  });
+
   it('rejects test cases without observable expected results', () => {
     const result = TestCaseSchema.safeParse({
       id: 'TC-001',

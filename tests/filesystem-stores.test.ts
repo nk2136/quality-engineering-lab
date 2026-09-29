@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -190,35 +190,111 @@ describe('filesystem stores', () => {
     expect(await store.get(workflow().id)).toMatchObject({ version: 1 });
   }, 20_000);
 
-  it('reclaims stale crashed locks without deleting a live owner lock', async () => {
+  it('reclaims an expired lease even when its recorded PID is currently live', async () => {
     const path = await root();
-    const store = new FileWorkflowStore(path);
+    const store = new FileWorkflowStore(path, {
+      lockTimeoutMs: 100,
+      lockStaleMs: 40,
+      lockHeartbeatMs: 10,
+      lockRetryMs: 5,
+    });
     await store.create(workflow());
     const lockPath = `${store.pathFor(workflow().id)}.lock`;
     const old = new Date(Date.now() - 60_000);
     await mkdir(lockPath);
-    await writeFile(join(lockPath, 'owner.json'), '{interrupted', 'utf8');
-    await utimes(lockPath, old, old);
-    await expect(store.save({ ...workflow(), status: 'running' }, 0)).resolves.toMatchObject({
-      version: 1,
-    });
-
-    await mkdir(lockPath);
     await writeFile(
       join(lockPath, 'owner.json'),
-      JSON.stringify({ host: hostname(), pid: process.pid }),
+      JSON.stringify({
+        token: 'expired-owner',
+        createdAt: old.toISOString(),
+        renewedAt: old.toISOString(),
+        host: hostname(),
+        pid: process.pid,
+      }),
       'utf8',
     );
     await utimes(lockPath, old, old);
-    const pending = store.save(
-      { ...(await store.get(workflow().id))!, status: 'waiting-for-human' },
-      1,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await expect(access(lockPath)).resolves.toBeUndefined();
-    await rm(lockPath, { recursive: true });
-    await expect(pending).resolves.toMatchObject({ version: 2 });
+
+    const pending = store.save({ ...workflow(), status: 'running' }, 0);
+    const outcome = await Promise.race([
+      pending.then(() => 'saved'),
+      new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 150)),
+    ]);
+    await rm(lockPath, { recursive: true, force: true });
+    await pending;
+
+    expect(outcome).toBe('saved');
   });
+
+  it('does not reclaim a lease that continues to renew', async () => {
+    const path = await root();
+    const store = new FileWorkflowStore(path, {
+      lockTimeoutMs: 80,
+      lockStaleMs: 40,
+      lockHeartbeatMs: 10,
+      lockRetryMs: 5,
+    });
+    await store.create(workflow());
+    const lockPath = `${store.pathFor(workflow().id)}.lock`;
+    const ownerPath = join(lockPath, 'owner.json');
+    await mkdir(lockPath);
+    const renew = async () => {
+      const temporaryPath = `${ownerPath}.renew`;
+      await writeFile(
+        temporaryPath,
+        JSON.stringify({
+          token: 'renewing-owner',
+          createdAt: new Date().toISOString(),
+          renewedAt: new Date().toISOString(),
+        }),
+        'utf8',
+      );
+      await rename(temporaryPath, ownerPath);
+    };
+    await renew();
+    const heartbeat = setInterval(() => void renew(), 10);
+
+    const pending = store
+      .save({ ...workflow(), status: 'running' }, 0)
+      .then(() => 'saved', (error: unknown) => (error instanceof Error ? error.message : 'error'));
+    const result = await Promise.race([
+      pending,
+      new Promise<'still-pending'>((resolve) => setTimeout(() => resolve('still-pending'), 150)),
+    ]);
+    clearInterval(heartbeat);
+    expect(JSON.parse(await readFile(ownerPath, 'utf8')).token).toBe('renewing-owner');
+    await rm(lockPath, { recursive: true, force: true });
+    await pending;
+
+    expect(result).toMatch(/Timed out acquiring lease/);
+  });
+
+  it('aborts a save and preserves the lock when its ownership token changes', async () => {
+    const path = await root();
+    const store = new FileWorkflowStore(path);
+    await store.create(workflow());
+    const child = saveInChild(path, 'token-test', 'running');
+    await waitFor(join(path, 'ready-token-test'));
+    await writeFile(join(path, 'go'), 'go', 'utf8');
+    const lockPath = `${store.pathFor(workflow().id)}.lock`;
+    const ownerPath = join(lockPath, 'owner.json');
+    await waitFor(ownerPath);
+    const replacement = {
+      token: 'replacement-owner',
+      createdAt: new Date().toISOString(),
+      renewedAt: new Date().toISOString(),
+    };
+    const temporaryPath = `${ownerPath}.replacement`;
+    await writeFile(temporaryPath, JSON.stringify(replacement), 'utf8');
+    await rename(temporaryPath, ownerPath);
+
+    const result = await child.result;
+    expect(result.output).toMatch(/lease .* lost/i);
+    expect(result.code).toBe(0);
+    expect(result.errors).toBe('');
+    expect(JSON.parse(await readFile(ownerPath, 'utf8')).token).toBe(replacement.token);
+    await rm(lockPath, { recursive: true, force: true });
+  }, 20_000);
 
   it('does not expose partial JSON while publishing a new artifact', async () => {
     const path = await root();
