@@ -74,6 +74,15 @@ Validate locally:
 npm run check
 ```
 
+Run the local UI Discovery demo and its browser acceptance tests:
+
+```bash
+npm run demo
+npm run test:ui
+```
+
+UI Discovery is loopback-only and accepts no credentials. It may navigate, fill, and submit the local demo form, but it blocks destructive controls and all non-loopback browser requests.
+
 Run the small live calibration corpus only after configuring credentials and accepting provider usage:
 
 ```bash

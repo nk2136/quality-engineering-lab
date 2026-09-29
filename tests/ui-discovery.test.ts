@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { UiDiscoveryAgent, type UiBrowserSession } from '../src/ui-discovery.js';
+import { createPlaywrightSession, startDemoApp, type DemoApp } from './fixtures/demo-app.js';
 
 const traceId = '3d594650-3436-4d7c-86a7-2b94788009bc';
 
@@ -91,5 +92,38 @@ describe('UiDiscoveryAgent evidence', () => {
       'initial', 'empty', 'validation', 'success',
     ]);
     expect(result.performedActions).toEqual(['navigate', 'submit', 'fill', 'submit']);
+  });
+});
+
+describe('UiDiscoveryAgent local browser', () => {
+  let app: DemoApp | undefined;
+
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  it('discovers the local eligibility flow without destructive actions', async () => {
+    app = await startDemoApp();
+    const agent = new UiDiscoveryAgent(createPlaywrightSession);
+
+    const result = await agent.discover(request({ baseUrl: app.url }));
+
+    expect(result.locators).toContainEqual(expect.objectContaining({ strategy: 'role-name', count: 1 }));
+    expect(result.observations.map(({ state }) => state)).toEqual([
+      'initial', 'empty', 'validation', 'success',
+    ]);
+    expect(result.performedActions).not.toContain('delete-history');
+  });
+
+  it('blocks an external redirect before collecting evidence', async () => {
+    app = await startDemoApp();
+    const agent = new UiDiscoveryAgent(createPlaywrightSession);
+
+    await expect(agent.discover(request({
+      baseUrl: app.url,
+      routes: ['/redirect'],
+      startPath: '/redirect',
+      allowedActions: ['navigate'],
+    }))).rejects.toThrow('loopback');
   });
 });

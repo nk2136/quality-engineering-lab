@@ -8,7 +8,7 @@ const page = `<!doctype html>
       <form aria-label="Eligibility check">
         <label for="member-id">Member ID</label>
         <input id="member-id" name="memberId" required>
-        <button type="submit">Check eligibility</button>
+        <button type="submit" data-testid="eligibility-submit">Check eligibility</button>
       </form>
       <p role="status" hidden>Eligible</p>
       <p role="alert" hidden>Member ID is required</p>
@@ -20,11 +20,26 @@ const page = `<!doctype html>
 
 export function createDemoServer(): Server {
   return createServer((request, response) => {
+    if (request.url === '/redirect') {
+      response.writeHead(302, { location: 'https://example.invalid' }).end();
+      return;
+    }
     if (request.url !== '/eligibility') {
       response.writeHead(404).end();
       return;
     }
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(page);
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`${page}<script>
+      const form = document.querySelector('form');
+      const input = document.querySelector('#member-id');
+      const status = document.querySelector('[role=status]');
+      const alert = document.querySelector('[role=alert]');
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const valid = input.value.trim() !== '';
+        alert.hidden = valid;
+        status.hidden = !valid;
+      });
+    </script>`);
   });
 }
 
