@@ -6,6 +6,7 @@ import {
   RetryExhaustedError,
   WorkflowCancelledError,
   type WorkflowState,
+  type WorkflowStore,
 } from '../src/contracts.js';
 import { InMemoryWorkflowStore } from '../src/in-memory-stores.js';
 import { LifecycleCoordinator } from '../src/lifecycle-coordinator.js';
@@ -31,6 +32,14 @@ function state(overrides: Partial<WorkflowState> = {}): WorkflowState {
     approval: { status: 'pending', reviewer: null, reviewedAt: null },
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
 }
 
 describe('LifecycleCoordinator', () => {
@@ -72,6 +81,23 @@ describe('LifecycleCoordinator', () => {
     await expect(lifecycle.start({ id: 'STORY-42', traceId: otherTraceId })).rejects.toBeInstanceOf(
       DuplicateRecordError,
     );
+  });
+
+  it('makes concurrent starts for the same id and trace idempotent', async () => {
+    const store = new InMemoryWorkflowStore();
+    const first = new LifecycleCoordinator(store, () => firstTime);
+    const second = new LifecycleCoordinator(store, () => secondTime);
+
+    const results = await Promise.allSettled([
+      first.start({ id: 'STORY-42', traceId }),
+      second.start({ id: 'STORY-42', traceId }),
+    ]);
+
+    expect(results).toEqual([
+      { status: 'fulfilled', value: state() },
+      { status: 'fulfilled', value: state() },
+    ]);
+    expect(await store.get('STORY-42')).toEqual(state());
   });
 
   it('validates start identifiers, trace UUIDs, and stages', async () => {
@@ -240,6 +266,125 @@ describe('LifecycleCoordinator', () => {
 
     expect(attempts).toBe(3);
     expect(result).toMatchObject({ stage: 'planning', status: 'pending' });
+  });
+
+  it('checks for cancellation before starting the next retry attempt', async () => {
+    const inner = new InMemoryWorkflowStore();
+    let cancelBeforeNextRead = false;
+    const store: WorkflowStore = {
+      create: (value) => inner.create(value),
+      save: (value, version) => inner.save(value, version),
+      get: async (id) => {
+        const current = await inner.get(id);
+        if (cancelBeforeNextRead && current?.status === 'running') {
+          cancelBeforeNextRead = false;
+          return inner.save({ ...current, status: 'cancelled' }, current.version);
+        }
+        return current;
+      },
+    };
+    const lifecycle = new LifecycleCoordinator(store, () => firstTime);
+    await lifecycle.start({ id: 'STORY-42', traceId });
+    let attempts = 0;
+
+    await expect(
+      lifecycle.run(
+        'STORY-42',
+        'planning',
+        async () => {
+          attempts += 1;
+          throw new Error('temporary');
+        },
+        {
+          maxAttempts: 3,
+          retryable: () => {
+            cancelBeforeNextRead = true;
+            return true;
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(WorkflowCancelledError);
+    expect(attempts).toBe(1);
+    expect(await inner.get('STORY-42')).toMatchObject({ status: 'cancelled', version: 2 });
+  });
+
+  it('rejects stale handoff completion without overwriting newer workflow progress', async () => {
+    const store = new InMemoryWorkflowStore();
+    const runner = new LifecycleCoordinator(store, () => firstTime);
+    const concurrent = new LifecycleCoordinator(store, () => secondTime);
+    await runner.start({ id: 'STORY-42', traceId });
+    const handoff = deferred<readonly string[]>();
+    const handoffStarted = deferred<void>();
+    const running = runner.run('STORY-42', 'planning', async () => {
+      handoffStarted.resolve();
+      return handoff.promise;
+    });
+    await handoffStarted.promise;
+    await concurrent.transition('STORY-42', 'planning');
+    const implementation = await concurrent.transition('STORY-42', 'implementation');
+
+    handoff.resolve(['artifact-1']);
+
+    await expect(running).rejects.toBeInstanceOf(ConcurrencyConflictError);
+    expect(await runner.resume('STORY-42')).toEqual(implementation);
+  });
+
+  it('settles malformed handoff artifact ids as failed', async () => {
+    const { coordinator: lifecycle } = coordinator();
+    await lifecycle.start({ id: 'STORY-42', traceId });
+    let attempts = 0;
+
+    await expect(
+      lifecycle.run(
+        'STORY-42',
+        'planning',
+        async () => {
+          attempts += 1;
+          return [''];
+        },
+        { maxAttempts: 3, retryable: () => true },
+      ),
+    ).rejects.toThrow();
+    expect(attempts).toBe(1);
+    await expect(lifecycle.resume('STORY-42')).resolves.toMatchObject({
+      stage: 'refinement',
+      status: 'failed',
+      version: 2,
+    });
+  });
+
+  it('settles retry predicate failures as failed and retains the handoff error as cause', async () => {
+    const { coordinator: lifecycle } = coordinator();
+    await lifecycle.start({ id: 'STORY-42', traceId });
+    const handoffError = new Error('handoff failed');
+    const predicateError = new Error('predicate failed');
+
+    let thrown: unknown;
+    try {
+      await lifecycle.run(
+        'STORY-42',
+        'planning',
+        async () => {
+          throw handoffError;
+        },
+        {
+          retryable: () => {
+            throw predicateError;
+          },
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe('predicate failed');
+    expect((thrown as Error).cause).toBe(handoffError);
+    await expect(lifecycle.resume('STORY-42')).resolves.toMatchObject({
+      stage: 'refinement',
+      status: 'failed',
+      version: 2,
+    });
   });
 
   it('rethrows a non-retryable failure and persists failed state without losing artifacts', async () => {

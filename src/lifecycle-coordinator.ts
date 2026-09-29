@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  ConcurrencyConflictError,
   DuplicateRecordError,
   InvalidTransitionError,
   RecordIdSchema,
@@ -36,6 +37,8 @@ const RunOptionsSchema = z.object({
     .custom<NonNullable<RunOptions['retryable']>>((value) => typeof value === 'function')
     .optional(),
 });
+
+const HandoffArtifactIdsSchema = z.array(RecordIdSchema);
 
 const nextStage: Partial<Record<WorkflowStage, WorkflowStage>> = {
   refinement: 'planning',
@@ -80,8 +83,15 @@ export class LifecycleCoordinator {
       if (existing.traceId === state.traceId) return existing;
       throw new DuplicateRecordError('Workflow', state.id);
     }
-    await this.workflows.create(state);
-    return state;
+    try {
+      await this.workflows.create(state);
+      return state;
+    } catch (error) {
+      if (!(error instanceof DuplicateRecordError)) throw error;
+      const concurrent = await this.workflows.get(state.id);
+      if (concurrent?.traceId === state.traceId) return WorkflowStateSchema.parse(concurrent);
+      throw error;
+    }
   }
 
   async resume(id: string): Promise<WorkflowState> {
@@ -125,46 +135,53 @@ export class LifecycleCoordinator {
     if (initial.status === 'cancelled') throw new WorkflowCancelledError(initial.id);
     this.assertTransition(initial, target);
 
-    await this.workflows.save(
+    const running = await this.workflows.save(
       WorkflowStateSchema.parse({ ...initial, status: 'running', updatedAt: this.now() }),
       initial.version,
     );
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      let artifactIds: readonly string[];
+      await this.assertUnchangedRunning(running);
+      let handoffOutput: readonly string[];
       try {
-        artifactIds = await handoff();
+        handoffOutput = await handoff();
       } catch (error) {
-        const current = await this.resume(initial.id);
-        if (current.status === 'cancelled') throw new WorkflowCancelledError(current.id);
-        if (!retryable(error)) {
-          await this.workflows.save(
-            WorkflowStateSchema.parse({ ...current, status: 'failed', updatedAt: this.now() }),
-            current.version,
-          );
+        await this.assertUnchangedRunning(running);
+        let shouldRetry: boolean;
+        try {
+          shouldRetry = retryable(error);
+        } catch (predicateError) {
+          await this.settle(running, 'failed');
+          throw this.withCause(predicateError, error);
+        }
+        if (!shouldRetry) {
+          await this.settle(running, 'failed');
           throw error;
         }
         if (attempt === maxAttempts) {
-          await this.workflows.save(
-            WorkflowStateSchema.parse({ ...current, status: 'blocked', updatedAt: this.now() }),
-            current.version,
-          );
+          await this.settle(running, 'blocked');
           throw new RetryExhaustedError(initial.id, attempt, { cause: error });
         }
         continue;
       }
 
-      const current = await this.resume(initial.id);
-      if (current.status === 'cancelled') throw new WorkflowCancelledError(current.id);
+      await this.assertUnchangedRunning(running);
+      let artifactIds: readonly string[];
+      try {
+        artifactIds = HandoffArtifactIdsSchema.parse(handoffOutput);
+      } catch (error) {
+        await this.settle(running, 'failed');
+        throw error;
+      }
       return this.workflows.save(
         WorkflowStateSchema.parse({
-          ...current,
+          ...running,
           stage: target,
           status: 'pending',
           updatedAt: this.now(),
-          artifactIds: [...new Set([...current.artifactIds, ...artifactIds])],
+          artifactIds: [...new Set([...running.artifactIds, ...artifactIds])],
         }),
-        current.version,
+        running.version,
       );
     }
 
@@ -187,5 +204,30 @@ export class LifecycleCoordinator {
       );
     }
     if (nextStage[state.stage] !== to) throw new InvalidTransitionError(state.stage, to);
+  }
+
+  private async assertUnchangedRunning(running: WorkflowState): Promise<void> {
+    const current = await this.resume(running.id);
+    if (current.status === 'cancelled') throw new WorkflowCancelledError(current.id);
+    if (current.version !== running.version || current.status !== 'running') {
+      throw new ConcurrencyConflictError(running.id, running.version, current.version);
+    }
+  }
+
+  private async settle(
+    running: WorkflowState,
+    status: 'failed' | 'blocked',
+  ): Promise<WorkflowState> {
+    await this.assertUnchangedRunning(running);
+    return this.workflows.save(
+      WorkflowStateSchema.parse({ ...running, status, updatedAt: this.now() }),
+      running.version,
+    );
+  }
+
+  private withCause(error: unknown, cause: unknown): Error {
+    const wrapped = new Error(error instanceof Error ? error.message : String(error), { cause });
+    if (error instanceof Error) wrapped.name = error.name;
+    return wrapped;
   }
 }
