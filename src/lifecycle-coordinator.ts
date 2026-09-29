@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   DuplicateRecordError,
   InvalidTransitionError,
+  RecordIdSchema,
   RetryExhaustedError,
   WorkflowCancelledError,
   WorkflowStateSchema,
@@ -21,6 +22,20 @@ export interface RunOptions {
   maxAttempts?: number;
   retryable?: (error: unknown) => boolean;
 }
+
+const StartWorkflowInputSchema = z.object({
+  id: RecordIdSchema,
+  traceId: z.string().uuid(),
+  stage: WorkflowStageSchema.optional(),
+  approvalRequired: z.boolean().optional(),
+});
+
+const RunOptionsSchema = z.object({
+  maxAttempts: z.number().int().positive().optional(),
+  retryable: z
+    .custom<NonNullable<RunOptions['retryable']>>((value) => typeof value === 'function')
+    .optional(),
+});
 
 const nextStage: Partial<Record<WorkflowStage, WorkflowStage>> = {
   refinement: 'planning',
@@ -45,16 +60,17 @@ export class LifecycleCoordinator {
   ) {}
 
   async start(input: StartWorkflowInput): Promise<WorkflowState> {
+    const validatedInput = StartWorkflowInputSchema.parse(input);
     const state = WorkflowStateSchema.parse({
-      id: input.id,
-      traceId: input.traceId,
-      stage: input.stage ?? 'refinement',
+      id: validatedInput.id,
+      traceId: validatedInput.traceId,
+      stage: validatedInput.stage ?? 'refinement',
       status: 'pending',
       version: 0,
       updatedAt: this.now(),
       artifactIds: [],
       approval: {
-        status: input.approvalRequired === false ? 'not-required' : 'pending',
+        status: validatedInput.approvalRequired === false ? 'not-required' : 'pending',
         reviewer: null,
         reviewedAt: null,
       },
@@ -101,8 +117,9 @@ export class LifecycleCoordinator {
     handoff: () => Promise<readonly string[]>,
     options: RunOptions = {},
   ): Promise<WorkflowState> {
-    const maxAttempts = z.number().int().positive().parse(options.maxAttempts ?? 1);
-    const retryable = options.retryable ?? (() => false);
+    const validatedOptions = RunOptionsSchema.parse(options);
+    const maxAttempts = validatedOptions.maxAttempts ?? 1;
+    const retryable = validatedOptions.retryable ?? (() => false);
     const initial = await this.resume(id);
     const target = WorkflowStageSchema.parse(to);
     if (initial.status === 'cancelled') throw new WorkflowCancelledError(initial.id);

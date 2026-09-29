@@ -84,6 +84,17 @@ describe('LifecycleCoordinator', () => {
     ).rejects.toThrow();
   });
 
+  it('rejects invalid start options before creating a workflow', async () => {
+    const { coordinator: lifecycle } = coordinator();
+
+    await expect(
+      lifecycle.start({ id: 'STORY-42', traceId, approvalRequired: 'false' as never }),
+    ).rejects.toThrow();
+    await expect(lifecycle.resume('STORY-42')).rejects.toThrow(
+      "Workflow 'STORY-42' does not exist.",
+    );
+  });
+
   it('resumes the latest checkpoint through a newly constructed coordinator', async () => {
     const store = new InMemoryWorkflowStore();
     const first = new LifecycleCoordinator(store, () => firstTime);
@@ -188,6 +199,26 @@ describe('LifecycleCoordinator', () => {
     await expect(
       lifecycle.run('STORY-42', 'planning', async () => [], { maxAttempts: 1.5 }),
     ).rejects.toThrow();
+    expect(await lifecycle.resume('STORY-42')).toEqual(state());
+  });
+
+  it('rejects a non-function retry predicate before running or calling handoff', async () => {
+    const { coordinator: lifecycle } = coordinator();
+    await lifecycle.start({ id: 'STORY-42', traceId });
+    let handoffCalled = false;
+
+    await expect(
+      lifecycle.run(
+        'STORY-42',
+        'planning',
+        async () => {
+          handoffCalled = true;
+          return [];
+        },
+        { retryable: 'not-a-function' as never },
+      ),
+    ).rejects.toThrow();
+    expect(handoffCalled).toBe(false);
     expect(await lifecycle.resume('STORY-42')).toEqual(state());
   });
 
