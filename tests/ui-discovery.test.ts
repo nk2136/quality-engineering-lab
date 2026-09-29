@@ -5,15 +5,18 @@ const traceId = '3d594650-3436-4d7c-86a7-2b94788009bc';
 
 class FakeBrowser implements UiBrowserSession {
   opened = false;
+  fills: string[] = [];
+  submits = 0;
+  readonly counts = new Map<string, number>();
 
   async open(): Promise<void> {
     this.opened = true;
   }
 
-  async fill(): Promise<void> {}
-  async submit(): Promise<void> {}
-  async accessibilitySnapshot(): Promise<string> { return '<main />'; }
-  async locatorCount(): Promise<number> { return 0; }
+  async fill(locator: string, value: string): Promise<void> { this.fills.push(`${locator}:${value}`); }
+  async submit(): Promise<void> { this.submits += 1; }
+  async accessibilitySnapshot(): Promise<string> { return `<main data-submit-count="${this.submits}" />`; }
+  async locatorCount(locator: string): Promise<number> { return this.counts.get(locator) ?? 0; }
   async screenshot(): Promise<string> { return 'screenshot.png'; }
   async close(): Promise<void> {}
 }
@@ -47,5 +50,46 @@ describe('UiDiscoveryAgent policy', () => {
       'not permitted for UI discovery',
     );
     expect(browser.opened).toBe(false);
+  });
+});
+
+describe('UiDiscoveryAgent evidence', () => {
+  it('prefers a unique role-and-name locator', async () => {
+    const browser = new FakeBrowser();
+    browser.counts.set('getByRole(button, { name: "Check eligibility" })', 1);
+    const agent = new UiDiscoveryAgent(() => browser);
+
+    const result = await agent.discover(request());
+
+    expect(result.locators[0]).toMatchObject({
+      locator: 'getByRole(button, { name: "Check eligibility" })',
+      strategy: 'role-name',
+      count: 1,
+    });
+  });
+
+  it('records a blocker when no locator is unique', async () => {
+    const browser = new FakeBrowser();
+    browser.counts.set('getByRole(button, { name: "Check eligibility" })', 2);
+    const agent = new UiDiscoveryAgent(() => browser);
+
+    const result = await agent.discover(request());
+
+    expect(result.locators).toEqual([]);
+    expect(result.blockers).toContain('No unique locator for Check eligibility.');
+  });
+
+  it('collects validation and success observations through allowed form actions', async () => {
+    const browser = new FakeBrowser();
+    const agent = new UiDiscoveryAgent(() => browser);
+
+    const result = await agent.discover(request());
+
+    expect(browser.fills).toEqual(['getByLabel("Member ID"):MEMBER-42']);
+    expect(browser.submits).toBe(2);
+    expect(result.observations.map(({ state }) => state)).toEqual([
+      'initial', 'empty', 'validation', 'success',
+    ]);
+    expect(result.performedActions).toEqual(['navigate', 'submit', 'fill', 'submit']);
   });
 });

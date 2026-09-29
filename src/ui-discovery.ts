@@ -62,11 +62,67 @@ function validateRequest(value: unknown): UiDiscoveryRequest {
   return request;
 }
 
+const candidates = [
+  ['getByRole(button, { name: "Check eligibility" })', 'role-name'],
+  ['getByLabel("Member ID")', 'label'],
+  ['getByTestId("eligibility-submit")', 'test-id'],
+  ['button:has-text("Check eligibility")', 'semantic'],
+  ['button[type="submit"]', 'css'],
+] as const;
+
+function requireAction(actions: readonly string[], action: z.infer<typeof ActionSchema>): void {
+  if (!actions.includes(action)) throw new Error(`Action '${action}' is required but not authorized.`);
+}
+
+async function observe(session: UiBrowserSession, state: UiObservation['state']): Promise<UiObservation> {
+  const [snapshotRef, screenshotRef] = await Promise.all([
+    session.accessibilitySnapshot(),
+    session.screenshot(`eligibility-${state}`),
+  ]);
+  return { state, snapshotRef, screenshotRef };
+}
+
 export class UiDiscoveryAgent {
   constructor(private readonly createSession: () => UiBrowserSession) {}
 
   async discover(value: unknown): Promise<UiDiscoveryResult> {
-    validateRequest(value);
-    return { locators: [], observations: [], blockers: [], performedActions: [] };
+    const request = validateRequest(value);
+    requireAction(request.allowedActions, 'navigate');
+    const session = this.createSession();
+    const performedActions: z.infer<typeof ActionSchema>[] = [];
+    try {
+      await session.open(new URL(request.startPath, request.baseUrl).href);
+      performedActions.push('navigate');
+
+      const locators: UiLocatorEvidence[] = [];
+      for (const [locator, strategy] of candidates) {
+        if (await session.locatorCount(locator) === 1) {
+          locators.push({ locator, strategy, count: 1 });
+        }
+      }
+
+      const observations = [await observe(session, 'initial'), await observe(session, 'empty')];
+      const submitLocator = 'getByRole(button, { name: "Check eligibility" })';
+      requireAction(request.allowedActions, 'submit');
+      await session.submit(submitLocator);
+      performedActions.push('submit');
+      observations.push(await observe(session, 'validation'));
+
+      requireAction(request.allowedActions, 'fill');
+      await session.fill('getByLabel("Member ID")', 'MEMBER-42');
+      performedActions.push('fill');
+      await session.submit(submitLocator);
+      performedActions.push('submit');
+      observations.push(await observe(session, 'success'));
+
+      return {
+        locators,
+        observations,
+        blockers: locators.length === 0 ? ['No unique locator for Check eligibility.'] : [],
+        performedActions,
+      };
+    } finally {
+      await session.close();
+    }
   }
 }
