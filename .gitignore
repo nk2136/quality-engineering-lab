@@ -4,4 +4,6 @@ dist/
 artifacts/*.json
 !artifacts/.gitkeep
 coverage/
+.qa-workflows/
+.taskmaster/state.json
 *.log

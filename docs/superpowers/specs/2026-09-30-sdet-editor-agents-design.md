@@ -1,0 +1,11 @@
+# SDET editor agents
+
+The approved interface is VS Code Copilot custom agents backed by a local stdio MCP server. SDET Coordinator is the entry point; Requirements Investigator, Test Designer, Test Design Reviewer, Automation Engineer, Automation Reviewer, and Failure Investigator are selectable specialists. Editor handoffs suggest a next specialist; persistent coordinator state decides whether work may advance.
+
+The server uses the existing filesystem workflow and artifact stores. It exposes workflow listing, workflow/artifact inspection, pending question inspection, structured response submission, and same-stage resumption. A human request contains owned questions, AC references and immutable evidence IDs, bound to the paused workflow version. A response is another immutable artifact and remains waiting until explicit resumption. All responses must cover every question and cite existing evidence from the workflow. Responses and resumptions reject stale versions, cancellation, cross-workflow references, and unknown questions.
+
+Resume returns the workflow to pending in the same stage so the responsible specialist can revalidate the package. It never grants patch approval or advances a stage. This increment does not implement the proposed Readiness Package semantic validator or automatic Jira assignment intake; the editor agents identify those boundaries honestly. The lifecycle coordinator rejects transitions and runs while waiting for a human.
+
+An explicit local mock command creates a synthetic pending question for an end-to-end editor demonstration. It is idempotent, clearly marked mock, and needs no Jira, GitHub, or model credentials. Local responder identity is a recorded assertion rather than authentication. No network listener, arbitrary file/path tool, execution tool, or approval tool is exposed by the MCP server.
+
+Verification includes persistent decision/resume tests, stale and concurrent response tests, cross-trace evidence rejection, lifecycle pause enforcement, MCP client protocol tests, and a real stdio smoke test. Agent files use supported VS Code metadata, restricted tool sets, and handoffs with send=false. VS Code configuration launches Node directly through the repository tsx CLI, so protocol stdout contains only MCP traffic and Windows paths work without ESM URL conversion.

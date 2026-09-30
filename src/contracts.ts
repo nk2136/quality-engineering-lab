@@ -70,6 +70,8 @@ export const ArtifactKindSchema = z.enum([
   'review',
   'approval',
   'failure-triage',
+  'human-decision-request',
+  'human-decision-response',
 ]);
 
 function hasPairedSurrogates(value: string): boolean {

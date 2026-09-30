@@ -1,0 +1,10 @@
+{
+  "master": {
+    "tasks": [
+      { "id": 1, "title": "Persist local human decisions", "description": "Add owned question and response schemas, version binding, evidence validation and same-stage resume.", "status": "done", "priority": "high", "dependencies": [], "details": "Use existing immutable ArtifactStore and optimistic WorkflowStore; reject stale, duplicate and cross-trace responses.", "testStrategy": "Vitest service and lifecycle regression tests.", "subtasks": [] },
+      { "id": 2, "title": "Expose editor coordinator tools", "description": "Add an MCP stdio server for workflow and decision inspection, response recording and resume.", "status": "done", "priority": "high", "dependencies": [1], "details": "Use SDK transport and validated tools; no patch approval or execution exposure.", "testStrategy": "MCP client contract tests and stdio smoke test.", "subtasks": [] },
+      { "id": 3, "title": "Provide VS Code agents and mock demonstration", "description": "Add seven named Copilot agents, repo server configuration and persistent synthetic pause.", "status": "done", "priority": "medium", "dependencies": [2], "details": "Keep human confirmation in coordinator instructions and gated handoffs in specialist instructions.", "testStrategy": "Verify agent metadata and run a local seed-response-resume round trip.", "subtasks": [] }
+    ],
+    "metadata": { "description": "Approved local VS Code SDET agent integration", "created": "2026-09-30T00:00:00.000Z" }
+  }
+}

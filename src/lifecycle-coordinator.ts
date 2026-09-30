@@ -219,6 +219,9 @@ export class LifecycleCoordinator {
   }
 
   private assertTransition(state: WorkflowState, to: WorkflowStage): void {
+    if (state.status === 'waiting-for-human') {
+      throw new Error(`Workflow '${state.id}' cannot advance while waiting-for-human.`);
+    }
     if (terminalStatuses.has(state.status)) {
       throw new Error(
         `Workflow '${state.id}' cannot transition while status is '${state.status}'.`,
