@@ -58,6 +58,7 @@ export type JiraHttpClient = (
 
 export interface JiraCloudKnowledgeSourceOptions {
   baseUrl: string;
+  allowedIssueKeys: readonly string[];
   authorization?: () => Promise<string | undefined>;
   httpClient?: JiraHttpClient;
   timeoutMs?: number;
@@ -182,12 +183,18 @@ function issueContent(issue: z.infer<typeof JiraIssueSchema>): string {
  */
 export class JiraCloudKnowledgeSource implements KnowledgeSource {
   readonly #baseUrl: string;
+  readonly #allowedIssueKeys: ReadonlySet<string>;
   readonly #authorization: () => Promise<string | undefined>;
   readonly #httpClient: JiraHttpClient;
   readonly #timeoutMs: number;
 
   constructor(options: JiraCloudKnowledgeSourceOptions) {
     this.#baseUrl = normalizeBaseUrl(options.baseUrl);
+    const allowedIssueKeys = z.array(JiraIssueKeySchema).min(1).parse([...options.allowedIssueKeys]);
+    if (new Set(allowedIssueKeys).size !== allowedIssueKeys.length) {
+      throw new Error('Jira issue allowlist must not contain duplicate keys.');
+    }
+    this.#allowedIssueKeys = new Set(allowedIssueKeys);
     this.#authorization = options.authorization ?? (() => Promise.resolve(undefined));
     this.#httpClient = options.httpClient ?? defaultHttpClient;
     this.#timeoutMs = z.number().int().positive().max(60_000).parse(options.timeoutMs ?? 10_000);
@@ -198,6 +205,9 @@ export class JiraCloudKnowledgeSource implements KnowledgeSource {
     if (!query.sources.includes('jira')) return [];
 
     const issueKey = JiraIssueKeySchema.parse(query.text.trim());
+    if (!this.#allowedIssueKeys.has(issueKey)) {
+      throw new Error(`Jira issue '${issueKey}' is not in the configured allowlist.`);
+    }
     const authorization = await this.#authorization();
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (authorization !== undefined && authorization.trim() !== '') {
