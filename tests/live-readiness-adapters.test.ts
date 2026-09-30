@@ -73,4 +73,55 @@ describe('live readiness knowledge adapters', () => {
     expect(credentialCalls).toBe(0);
     expect(httpCalls).toBe(0);
   });
+
+  it('does not forward undeclared policy credentials to either adapter', async () => {
+    const authorizations: Array<string | undefined> = [];
+    const policy = {
+      jira: {
+        baseUrl: 'https://example.atlassian.net',
+        allowedIssueKeys: ['QE-42'],
+        authorization: async () => 'Bearer policy-secret',
+      },
+      github: {
+        repository: 'acme/product',
+        revision,
+        paths: ['docs/architecture.md'],
+        authorization: async () => 'Bearer policy-secret',
+      },
+    };
+    const source = createLiveReadinessKnowledgeSource(policy, {
+      jiraHttpClient: async (_url, request) => {
+        authorizations.push(request.headers.Authorization);
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({
+            id: '10042', key: 'QE-42', fields: {
+              summary: 'Readiness story', updated: '2026-09-29T21:00:00.000+0000',
+              status: { name: 'Refinement' }, issuetype: { name: 'Story' }, issuelinks: [],
+            },
+          }),
+        };
+      },
+      githubHttpClient: async (_url, request) => {
+        authorizations.push(request.headers.Authorization);
+        const content = 'Architecture documents eligibility authorization.';
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({
+            type: 'file', encoding: 'base64', path: 'docs/architecture.md', sha: 'b'.repeat(40),
+            size: Buffer.byteLength(content), content: Buffer.from(content).toString('base64'),
+          }),
+        };
+      },
+    });
+
+    await source.search(query);
+    await source.search({ ...query, text: 'architecture', sources: ['github'] });
+
+    expect(authorizations).toEqual([undefined, undefined]);
+  });
 });

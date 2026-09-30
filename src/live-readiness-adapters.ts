@@ -39,7 +39,8 @@ export function createLiveReadinessKnowledgeSource(
 ): KnowledgeSource {
   return new CompositeKnowledgeSource({
     jira: new JiraCloudKnowledgeSource({
-      ...policy.jira,
+      baseUrl: policy.jira.baseUrl,
+      allowedIssueKeys: policy.jira.allowedIssueKeys,
       ...(dependencies.credentials?.jira === undefined
         ? {} : { authorization: dependencies.credentials.jira }),
       ...(dependencies.jiraHttpClient === undefined
@@ -47,7 +48,9 @@ export function createLiveReadinessKnowledgeSource(
       ...(dependencies.timeoutMs === undefined ? {} : { timeoutMs: dependencies.timeoutMs }),
     }),
     github: new GitHubRepositoryKnowledgeSource({
-      ...policy.github,
+      repository: policy.github.repository,
+      revision: policy.github.revision,
+      paths: policy.github.paths,
       ...(dependencies.credentials?.github === undefined
         ? {} : { authorization: dependencies.credentials.github }),
       ...(dependencies.githubHttpClient === undefined
