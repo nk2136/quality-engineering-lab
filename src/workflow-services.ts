@@ -28,6 +28,8 @@ export interface WorkflowServiceOptions {
   readonly workflows: WorkflowStore;
   readonly artifacts: ArtifactStore;
   readonly requirements?: RequirementsInvestigatorDependencies;
+  /** Named read-only source ports for live or local evidence providers. */
+  readonly knowledgeSources?: RequirementsInvestigatorDependencies;
   readonly execute?: LocalExecutor;
   readonly now?: () => string;
 }
@@ -156,7 +158,7 @@ export class StoryToTestWorkflowService {
   constructor(options: WorkflowServiceOptions) {
     this.#workflows = options.workflows;
     this.#artifacts = options.artifacts;
-    this.#requirements = options.requirements;
+    this.#requirements = options.requirements ?? options.knowledgeSources;
     this.#execute = options.execute;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.coordinator = new LifecycleCoordinator(options.workflows, this.#now, options.artifacts);
