@@ -73,8 +73,86 @@ export const FailureTriageSchema = z.object({
   needsHumanReview: z.boolean(),
 });
 
+const ReadinessEvidenceReferenceSchema = z.object({
+  evidenceIds: z.array(z.string().min(1)).min(1),
+});
+
+const ReadinessSourceSchema = z.object({
+  id: z.string().min(1),
+  source: z.string().min(1),
+  revision: z.string().min(1),
+  evidenceIds: z.array(z.string().min(1)).min(1),
+});
+
+const ReadinessAcceptanceCriterionSchema = ReadinessEvidenceReferenceSchema.extend({
+  id: z.string().regex(/^AC-\d+$/),
+  statement: z.string().min(1),
+});
+
+const ReadinessFactSchema = ReadinessEvidenceReferenceSchema.extend({
+  id: z.string().regex(/^FACT-\d+$/),
+  statement: z.string().min(1),
+});
+
+const HistoricalRelevanceSchema = ReadinessEvidenceReferenceSchema.extend({
+  id: z.string().regex(/^HISTORY-\d+$/),
+  statement: z.string().min(1),
+  relevance: z.string().min(1),
+});
+
+const VerificationMethodSchema = ReadinessEvidenceReferenceSchema.extend({
+  id: z.string().regex(/^METHOD-\d+$/),
+  description: z.string().min(1),
+  status: z.enum(['candidate', 'confirmed']),
+});
+
+const AcceptanceVerificationSchema = ReadinessEvidenceReferenceSchema.extend({
+  acId: z.string().regex(/^AC-\d+$/),
+  expectedBehavior: z.string().min(1),
+  observableOutcome: z.string().min(1),
+  verificationMethods: z.array(VerificationMethodSchema).min(1),
+});
+
+const ReadinessPrerequisiteSchema = ReadinessEvidenceReferenceSchema.extend({
+  id: z.string().regex(/^PREREQ-\d+$/),
+  description: z.string().min(1),
+  status: z.enum(['available', 'missing', 'unknown']),
+});
+
+const ReadinessClarificationSchema = ReadinessEvidenceReferenceSchema.extend({
+  id: z.string().regex(/^QUESTION-\d+$/),
+  question: z.string().min(1),
+  owner: z.string().min(1),
+});
+
+const ReadinessBlockerSchema = ReadinessEvidenceReferenceSchema.extend({
+  id: z.string().regex(/^BLOCKER-\d+$/),
+  phase: z.string().min(1),
+  description: z.string().min(1),
+});
+
+export const ReadinessPackageSchema = z.object({
+  schemaVersion: z.literal('1.0'),
+  packageId: z.string().min(1),
+  traceId: z.string().uuid(),
+  storyKey: z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/),
+  createdAt: z.string().datetime(),
+  provenance: z.object({
+    sources: z.array(ReadinessSourceSchema).min(1),
+  }),
+  acceptanceCriteria: z.array(ReadinessAcceptanceCriterionSchema).min(1),
+  confirmedFacts: z.array(ReadinessFactSchema),
+  historicalRelevance: z.array(HistoricalRelevanceSchema),
+  acVerificationMap: z.array(AcceptanceVerificationSchema).min(1),
+  accessDataPrerequisites: z.array(ReadinessPrerequisiteSchema),
+  ownedClarifications: z.array(ReadinessClarificationSchema),
+  phaseSpecificBlockers: z.array(ReadinessBlockerSchema),
+  proposedReadinessDecision: z.enum(['ready', 'needs-refinement', 'blocked']),
+});
+
 export type RequirementAnalysis = z.infer<typeof RequirementAnalysisSchema>;
 export type TestDesign = z.infer<typeof TestDesignSchema>;
 export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;
 export type QaPlan = z.infer<typeof QaPlanSchema>;
 export type FailureTriage = z.infer<typeof FailureTriageSchema>;
+export type ReadinessPackage = z.infer<typeof ReadinessPackageSchema>;
