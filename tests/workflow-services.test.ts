@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { InMemoryArtifactStore, InMemoryWorkflowStore } from '../src/in-memory-stores.js';
-import { StoryToTestWorkflowService } from '../src/workflow-services.js';
+import { createLiveReadinessKnowledgeSource } from '../src/live-readiness-adapters.js';
+import { staticEvidenceSource, StoryToTestWorkflowService } from '../src/workflow-services.js';
 
 const traceId = '3d594650-3436-4d7c-86a7-2b94788009bc';
 const revision = 'rev-7';
@@ -30,6 +31,92 @@ function profile() {
 }
 
 describe('StoryToTestWorkflowService', () => {
+  it('integrates allowlisted live readiness sources without publishing runtime credentials', async () => {
+    const artifacts = new InMemoryArtifactStore();
+    const workflows = new InMemoryWorkflowStore();
+    const runtimeCredential = 'Bearer runtime-only-secret';
+    const requests: Array<{ url: string; authorization: string | undefined }> = [];
+    const source = createLiveReadinessKnowledgeSource({
+      jira: { baseUrl: 'https://example.atlassian.net', allowedIssueKeys: ['QE-42'] },
+      github: { repository: 'acme/product', revision: 'a'.repeat(40), paths: ['src/membership.ts'] },
+    }, {
+      credentials: {
+        jira: async () => runtimeCredential,
+        github: async () => runtimeCredential,
+      },
+      jiraHttpClient: async (url, request) => {
+        requests.push({ url, authorization: request.headers.Authorization });
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({
+            id: '10042',
+            key: 'QE-42',
+            fields: {
+              summary: 'Reject inactive members',
+              description: 'AC-1: Inactive members receive rejection.',
+              updated: '2026-10-15T11:00:00.000+0000',
+              status: { name: 'Refinement' },
+              issuetype: { name: 'Story' },
+              components: [{ name: 'membership-service' }],
+              issuelinks: [],
+            },
+          }),
+        };
+      },
+      githubHttpClient: async (url, request) => {
+        requests.push({ url, authorization: request.headers.Authorization });
+        const content = JSON.stringify({
+          storyKey: 'QE-42',
+          component: 'membership-service',
+          revision: 'a'.repeat(40),
+          files: ['src/membership.ts'],
+        });
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({
+            type: 'file',
+            encoding: 'base64',
+            size: Buffer.byteLength(content),
+            path: 'src/membership.ts',
+            sha: 'a'.repeat(40),
+            content: Buffer.from(content).toString('base64'),
+          }),
+        };
+      },
+    });
+    const history = staticEvidenceSource({ evidence: [evidence('history-QE-42', 'jira', JSON.stringify({ summary: 'Prior behavior.' }))] });
+    const tests = staticEvidenceSource({ evidence: [evidence('test-QE-42', 'test', JSON.stringify({ covers: ['Inactive members receive rejection.'] }))] });
+    const service = new StoryToTestWorkflowService({
+      artifacts,
+      workflows,
+      knowledgeSources: { ticket: source, history, source, tests },
+      now: () => asOf,
+    });
+
+    const result = await service.investigateRequirements({
+      traceId,
+      storyKey: 'QE-42',
+      sourceRevision: 'a'.repeat(40),
+      asOf,
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests.every((request) => request.authorization === runtimeCredential)).toBe(true);
+    expect(requests[0]?.url).toContain('/rest/api/3/issue/QE-42?');
+    expect(requests[1]?.url).toBe(
+      `https://api.github.com/repos/acme/product/contents/src/membership.ts?ref=${'a'.repeat(40)}`,
+    );
+    const agentFacingArtifacts = JSON.stringify({ result, artifacts: await artifacts.listByTrace(traceId) });
+    expect(agentFacingArtifacts).not.toContain(runtimeCredential);
+    expect(agentFacingArtifacts).not.toContain('runtime-only-secret');
+    expect(agentFacingArtifacts).toContain('QE-42');
+    expect(agentFacingArtifacts).toContain('src/membership.ts');
+  });
+
   it('wires investigation, handoffs, design, review, bounded automation, and verification', async () => {
     const artifacts = new InMemoryArtifactStore();
     const workflows = new InMemoryWorkflowStore();

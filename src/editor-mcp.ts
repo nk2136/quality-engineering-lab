@@ -44,6 +44,7 @@ const DesignInputSchema = z.strictObject({
 export interface EditorServerOptions {
   /** Read-only source ports may be supplied by the host; no MCP argument can replace them. */
   readonly requirements?: WorkflowServiceOptions['requirements'];
+  readonly knowledgeSources?: WorkflowServiceOptions['knowledgeSources'];
   readonly now?: WorkflowServiceOptions['now'];
 }
 
@@ -57,6 +58,7 @@ export function createEditorServer(root: string, options: EditorServerOptions = 
     workflows,
     artifacts,
     ...(options.requirements === undefined ? {} : { requirements: options.requirements }),
+    ...(options.knowledgeSources === undefined ? {} : { knowledgeSources: options.knowledgeSources }),
     ...(options.now === undefined ? {} : { now: options.now }),
   };
   const workflowService = new StoryToTestWorkflowService(serviceOptions);
