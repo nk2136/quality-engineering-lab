@@ -60,10 +60,12 @@ describe('story-to-test acceptance flow', () => {
       'diff --git a/tests/membership.test.ts b/tests/membership.test.ts',
       '--- a/tests/membership.test.ts',
       '+++ b/tests/membership.test.ts',
-      '@@ -1,1 +1,3 @@',
+      '@@ -1 +1,3 @@',
+      '-export const existing = false;',
+      '+export const existing = false;',
       '+// QE-42: bounded synthetic acceptance coverage',
       '+export const qe42 = true;',
-    ].join('\n');
+    ].join('\n') + '\n';
     const automationReview = reviewAutomationPatch({
       diff, revision, allowlistedPaths: [intent.targetPath], patchIntent: intent,
       design, readinessPackage: readiness, projectProfile: profile,
