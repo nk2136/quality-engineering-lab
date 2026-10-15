@@ -1,21 +1,39 @@
-# Read-only GitHub repository adapter
+# GitHub read-only adapters
 
-`GitHubRepositoryKnowledgeSource` retrieves a small, explicitly configured set of UTF-8 files through GitHub's repository contents API. It is intended for architecture decisions, ownership metadata, API specifications, and relevant test files used by Story Readiness.
+`GitHubRepositoryKnowledgeSource` reads a fixed, normalized file manifest at
+an immutable commit. `GitHubLinkedPrKnowledgeSource` is the separate historical
+boundary for metadata on explicitly allowlisted pull requests.
 
-## Security and reproducibility boundaries
+## Shared security boundary
 
-- The repository is fixed when the adapter is created.
-- Every request uses a full 40- or 64-character Git object ID, never a mutable branch or tag.
-- Only normalized, unique paths from a manifest of at most 50 files can be read.
-- The repository, full object ID, and file manifest are the GitHub allowlist.
-- Requests use `GET`, reject redirects, enforce timeouts, and target `api.github.com` only.
-- Authorization is injected at runtime and never enters model context or error messages.
-- Files are limited to 1 MB, must be Base64-encoded UTF-8, and must match their declared byte size.
-- Returned evidence uses a commit-pinned URI and the file blob ID as its revision.
-- The adapter provides no discovery, code search, branch lookup, file write, pull request, or merge operation.
+- Repository policy is explicit; the linked-PR adapter accepts only PR numbers
+  in `allowedPrNumbers` (maximum 100, with no duplicates).
+- Authorization is supplied through a runtime callback and never enters policy,
+  evidence, or sanitized error messages.
+- Requests target `api.github.com`, use `GET` only, reject redirects, and
+  enforce a timeout capped at 60 seconds.
+- No adapter performs discovery, code search, merge, or write operations.
 
-The adapter performs deterministic lexical ranking across the configured manifest. This is intentionally a bounded baseline; hybrid or embedding retrieval should replace it only after improving the Story Readiness retrieval evaluation corpus.
+## Repository adapter
 
-`createLiveReadinessKnowledgeSource` composes this adapter with the Jira adapter from non-secret policy. Authorization callbacks are runtime-only and remain outside policy and agent-facing context.
+Repository evidence is restricted to normalized paths (maximum 50), immutable
+40- or 64-character Git object IDs, and UTF-8 files capped at 1 MiB. Returned
+evidence uses the file blob SHA as its revision and applies deterministic
+lexical ranking.
 
-GitHub documents that the contents endpoint accepts a `ref`, returns Base64 file content, and needs only read-level Contents permission for fine-grained tokens and GitHub Apps: [REST API endpoints for repository contents](https://docs.github.com/en/rest/repos/contents?apiVersion=2026-03-10#get-repository-content).
+## Linked pull-request adapter
+
+`GitHubLinkedPrKnowledgeSource` requests exactly
+`GET /repos/{owner}/{repo}/pulls/{number}`. A query accepts only a positive PR
+number (optionally prefixed with `#`) and must pass the explicit allowlist
+before credentials or HTTP are resolved. Metadata is normalized to title,
+body, state, draft/merge state, timestamps, author, labels, and head/base refs
+and SHAs. The head SHA is used as the evidence revision, while the pull-request
+URI remains tied to the configured repository and allowlisted number.
+
+The returned `ContextEvidence` has an immutable payload for the retrieval and
+provider errors are bounded and secret-redacted. This adapter deliberately
+does not retrieve review comments or discover linked pull requests.
+
+See [GitHub REST API pull requests](https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request)
+and [repository contents](https://docs.github.com/en/rest/repos/contents).
