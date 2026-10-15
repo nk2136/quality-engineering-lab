@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { ContextEvidenceSchema, type ContextEvidence } from './context.js';
 import {
   ArtifactRecordSchema,
@@ -15,9 +16,11 @@ const IssueKeySchema = z.string().regex(/^[A-Z][A-Z0-9_]*-\d+$/);
 
 export const StoryAssignmentSchema = z.object({
   assignmentId: RecordIdSchema,
+  assignee: z.string().trim().min(1),
   traceId: z.string().uuid(),
   provider: z.string().min(1),
   issueKey: IssueKeySchema,
+  sourceRevision: z.string().trim().min(1),
   workType: z.string().min(1).optional(),
   assignmentType: z.string().min(1).optional(),
   asOf: z.string().datetime().optional(),
@@ -76,13 +79,25 @@ export class StoryNotAllowlistedError extends Error {
   }
 }
 
+export class StoryAssignmentReplayMismatchError extends Error {
+  constructor(assignmentId: string) {
+    super(`Story assignment '${assignmentId}' replay does not match its original fingerprint.`);
+    this.name = 'StoryAssignmentReplayMismatchError';
+  }
+}
+
 const IntakeArtifactContentSchema = z.object({
   assignmentId: RecordIdSchema,
+  assignee: z.string().trim().min(1),
   storyKey: IssueKeySchema,
   provider: z.literal('jira'),
+  sourceRevision: z.string().trim().min(1),
   revision: z.string().min(1),
+  fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   evidence: ContextEvidenceSchema,
 });
+
+type ParsedStoryAssignment = z.infer<typeof StoryAssignmentSchema>;
 
 function timestamp(now: () => string): string {
   return z.string().datetime().parse(now());
@@ -94,6 +109,20 @@ function validatedPolicy(policy: StoryIntakePolicy): ReadonlySet<string> {
     throw new Error('Story issue allowlist must not contain duplicate keys.');
   }
   return new Set(keys);
+}
+
+function assignmentFingerprint(input: ParsedStoryAssignment): string {
+  return createHash('sha256').update(JSON.stringify({
+    assignmentId: input.assignmentId,
+    assignee: input.assignee,
+    traceId: input.traceId,
+    provider: input.provider,
+    issueKey: input.issueKey,
+    sourceRevision: input.sourceRevision,
+    workType: input.workType ?? null,
+    assignmentType: input.assignmentType ?? null,
+    asOf: input.asOf ?? null,
+  })).digest('hex');
 }
 
 /**
@@ -154,7 +183,7 @@ export class StoryIntakeRouter {
       }
       const artifact = await this.#artifacts.get(`story-intake:${input.assignmentId}`);
       if (artifact === undefined) throw new Error(`Story intake artifact '${input.assignmentId}' is missing.`);
-      return this.#resultFromArtifact(artifact, existingWorkflow);
+      return this.#resultFromArtifact(artifact, existingWorkflow, input);
     }
 
     const existingArtifact = await this.#artifacts.get(`story-intake:${input.assignmentId}`);
@@ -167,7 +196,7 @@ export class StoryIntakeRouter {
         traceId: input.traceId,
         stage: 'refinement',
       });
-      return this.#resultFromArtifact(existingArtifact, workflow);
+      return this.#resultFromArtifact(existingArtifact, workflow, input);
     }
 
     const evidence = await this.#retrieve(input);
@@ -180,15 +209,21 @@ export class StoryIntakeRouter {
       createdAt: timestamp(this.#now),
       content: {
         assignmentId: input.assignmentId,
+        assignee: input.assignee,
         storyKey: input.issueKey,
         provider: 'jira',
+        sourceRevision: input.sourceRevision,
         revision: evidence.revision,
+        fingerprint: assignmentFingerprint(input),
         evidence,
       },
       metadata: {
+        assignee: input.assignee,
         storyKey: input.issueKey,
         provider: 'jira',
+        sourceRevision: input.sourceRevision,
         revision: evidence.revision,
+        fingerprint: assignmentFingerprint(input),
       },
     });
     try {
@@ -204,10 +239,10 @@ export class StoryIntakeRouter {
     });
     const storedArtifact = await this.#artifacts.get(artifactId);
     if (storedArtifact === undefined) throw new Error(`Story intake artifact '${artifactId}' is missing.`);
-    return this.#resultFromArtifact(storedArtifact, workflow);
+    return this.#resultFromArtifact(storedArtifact, workflow, input);
   }
 
-  async #retrieve(input: z.infer<typeof StoryAssignmentSchema>): Promise<ContextEvidence> {
+  async #retrieve(input: ParsedStoryAssignment): Promise<ContextEvidence> {
     const asOf = input.asOf ?? timestamp(this.#now);
     const evidence = z.array(ContextEvidenceSchema).parse(await this.#knowledge.search({
       traceId: input.traceId,
@@ -220,13 +255,35 @@ export class StoryIntakeRouter {
     if (story === undefined) {
       throw new Error(`Jira adapter returned no evidence for story '${input.issueKey}'.`);
     }
+    if (story.revision !== input.sourceRevision) {
+      throw new Error(
+        `Jira source revision '${story.revision}' does not match pinned assignment revision '${input.sourceRevision}'.`,
+      );
+    }
     return story;
   }
 
-  #resultFromArtifact(artifactValue: Awaited<ReturnType<ArtifactStore['get']>>, workflow: WorkflowState): StoryIntakeResult {
+  #resultFromArtifact(
+    artifactValue: Awaited<ReturnType<ArtifactStore['get']>>,
+    workflow: WorkflowState,
+    input: ParsedStoryAssignment,
+  ): StoryIntakeResult {
     if (artifactValue === undefined) throw new Error('Story intake artifact is missing.');
     const content = IntakeArtifactContentSchema.parse(artifactValue.content);
-    return { ...content, workflow };
+    if (
+      artifactValue.traceId !== input.traceId ||
+      content.assignmentId !== input.assignmentId ||
+      content.assignee !== input.assignee ||
+      content.storyKey !== input.issueKey ||
+      content.provider !== input.provider ||
+      content.sourceRevision !== input.sourceRevision ||
+      content.revision !== input.sourceRevision ||
+      content.fingerprint !== assignmentFingerprint(input)
+    ) {
+      throw new StoryAssignmentReplayMismatchError(input.assignmentId);
+    }
+    const { assignmentId, storyKey, provider, revision, evidence } = content;
+    return { assignmentId, storyKey, provider, revision, evidence, workflow };
   }
 }
 

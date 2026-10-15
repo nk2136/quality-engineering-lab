@@ -8,6 +8,8 @@ function packageValue(overrides: Record<string, unknown> = {}) {
   return {
     schemaVersion: '1.0',
     packageId: 'readiness:QE-42:1',
+    revision: 'readiness-rev-1',
+    component: 'membership-service',
     traceId,
     storyKey: 'QE-42',
     createdAt: '2026-10-15T12:00:00.000Z',
@@ -43,6 +45,25 @@ function packageValue(overrides: Record<string, unknown> = {}) {
         evidenceIds: ['jira-QE-42'],
       },
     ],
+    discrepancyRows: [
+      {
+        id: 'DISCREPANCY-1',
+        acId: 'AC-1',
+        classification: 'aligned',
+        description: 'Existing behavior matches the story criterion.',
+        evidenceIds: ['jira-QE-42'],
+      },
+    ],
+    rtm: [
+      {
+        id: 'RTM-1',
+        acId: 'AC-1',
+        expectedBehavior: 'An inactive member request is rejected.',
+        observableOutcome: 'The response is HTTP 403 with the documented rejection body.',
+        verificationMethods: ['METHOD-1'],
+        evidenceIds: ['jira-QE-42'],
+      },
+    ],
     acVerificationMap: [
       {
         acId: 'AC-1',
@@ -70,6 +91,7 @@ function packageValue(overrides: Record<string, unknown> = {}) {
     ownedClarifications: [],
     phaseSpecificBlockers: [],
     proposedReadinessDecision: 'ready',
+    readinessDecision: 'ready-for-design',
     ...overrides,
   };
 }
@@ -114,6 +136,49 @@ describe('validateReadinessPackage', () => {
     });
 
     expect(() => validateReadinessPackage(value)).toThrow("Evidence 'unknown-evidence' is not declared in provenance.");
+  });
+
+  it('requires revision, component, discrepancy rows, RTM, and a ready-for-design decision', () => {
+    const value = packageValue({
+      revision: undefined,
+      component: undefined,
+      discrepancyRows: undefined,
+      rtm: undefined,
+      readinessDecision: undefined,
+    });
+
+    expect(ReadinessPackageSchema.safeParse(value).success).toBe(false);
+  });
+
+  it('rejects unresolved discrepancies and blockers under a ready-for-design decision', () => {
+    expect(() => validateReadinessPackage(packageValue({
+      discrepancyRows: [{
+        id: 'DISCREPANCY-1',
+        acId: 'AC-1',
+        classification: 'conflict',
+        description: 'Implementation conflicts with the story.',
+        evidenceIds: ['jira-QE-42'],
+      }],
+      phaseSpecificBlockers: [{
+        id: 'BLOCKER-1',
+        phase: 'refinement',
+        description: 'The conflict is unresolved.',
+        evidenceIds: ['jira-QE-42'],
+      }],
+    }))).toThrow();
+  });
+
+  it('rejects duplicate row IDs and historical rows without an explanation', () => {
+    const duplicate = packageValue({
+      confirmedFacts: [
+        { id: 'FACT-1', statement: 'One.', evidenceIds: ['jira-QE-42'] },
+        { id: 'FACT-1', statement: 'Two.', evidenceIds: ['jira-QE-42'] },
+      ],
+    });
+    expect(() => validateReadinessPackage(duplicate)).toThrow("ID 'FACT-1' is duplicated.");
+
+    const noHistory = packageValue({ historicalRelevance: [] });
+    expect(ReadinessPackageSchema.safeParse(noHistory).success).toBe(false);
   });
 
   it('returns a normalized package when all references and gates are valid', () => {

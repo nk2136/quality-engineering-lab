@@ -11,9 +11,11 @@ import {
 const traceId = '3d594650-3436-4d7c-86a7-2b94788009bc';
 const assignment = {
   assignmentId: 'assignment-QE-42',
+  assignee: 'sdet-agent',
   traceId,
   provider: 'jira',
   issueKey: 'QE-42',
+  sourceRevision: '2026-10-15T18:00:00.000+0000',
   workType: 'sdet' as const,
 };
 
@@ -104,6 +106,37 @@ describe('story assignment intake', () => {
       kind: 'requirement-analysis',
       content: expect.objectContaining({ revision: evidence.revision }),
     });
+  });
+
+  it('rejects assignments without an assignee or pinned source revision', async () => {
+    const setup = router();
+
+    await expect(setup.router.intake({ ...assignment, assignee: undefined } as never)).rejects.toThrow();
+    await expect(setup.router.intake({ ...assignment, sourceRevision: undefined } as never)).rejects.toThrow();
+    expect(setup.source.calls).toEqual([]);
+  });
+
+  it('rejects evidence that does not match the pinned source revision', async () => {
+    const setup = router();
+    const mismatched = { ...evidence, revision: '2026-10-15T19:00:00.000+0000' };
+    setup.source.search = async (query) => {
+      setup.source.calls.push(query);
+      return [mismatched];
+    };
+
+    await expect(setup.router.intake(assignment)).rejects.toThrow(
+      "Jira source revision '2026-10-15T19:00:00.000+0000' does not match pinned assignment revision '2026-10-15T18:00:00.000+0000'.",
+    );
+  });
+
+  it('rejects a replay whose assignment fingerprint differs from the original', async () => {
+    const setup = router();
+    await setup.router.intake(assignment);
+
+    await expect(setup.router.intake({ ...assignment, assignee: 'another-sdet' })).rejects.toThrow(
+      "Story assignment 'assignment-QE-42' replay does not match its original fingerprint.",
+    );
+    expect(setup.source.calls).toHaveLength(1);
   });
 
   it('is idempotent and reuses the captured revision without a second source read', async () => {
