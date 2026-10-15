@@ -63,7 +63,7 @@ export const ProjectProfileSchema = z.object({
     allowedDataSources: z.array(z.enum(['fixtures', 'mocks', 'local-artifacts'])).min(1),
   }).strict(),
   reportingExport: z.object({
-    formats: z.array(z.enum(['json', 'markdown', 'junit', 'html'])).min(1),
+    formats: z.array(z.enum(['json', 'csv', 'markdown', 'junit', 'html'])).min(1),
     destinations: z.array(z.enum(['local-file', 'artifact-store'])).min(1),
   }).strict(),
   criticalChecks: z.array(CommandSchema).min(1),
