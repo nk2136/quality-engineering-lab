@@ -101,6 +101,22 @@ npm run agent -- workflow --input artifacts/workflow-input.json
 
 This command does not call a provider and does not execute a patch. It can return an existing-coverage decision or a policy-clean proposal awaiting a separate hash-bound human approval. The local executor copies a supplied fixture to a temporary directory, uses `git apply` and argument-array commands, and passes an allowlisted environment. It is a contamination guard, not a production security sandbox.
 
+## Complete story-to-test acceptance flow
+
+The end-to-end local acceptance path covers assignment/refinement, the Phase A
+evidence gate, test design and independent review, the Phase B bounded
+automation/review gate, hash-bound human approval, disposable verification, and
+evidence reporting. Run it with:
+
+```text
+npx vitest run tests/acceptance/workflow-acceptance.test.ts
+```
+
+See [the operations runbook](docs/WORKFLOW_OPERATIONS.md) and the
+[example project profile](docs/examples/story-to-test.profile.md) for recovery,
+human decision points, and the provider-agnostic boundary. This remains a local
+mock flow; it does not claim live Jira, GitHub, CI, or deployment access.
+
 ### Durable workflow checkpoints
 
 `FileWorkflowStore` and `FileArtifactStore` provide filesystem-backed persistence for lifecycle checkpoints and artifacts. The current Story Readiness workflow continues to use its existing store wiring; a later vertical-slice plan will connect it to these durable stores.

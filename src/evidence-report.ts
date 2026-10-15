@@ -32,3 +32,46 @@ export type WorkflowEvidenceReport = z.infer<typeof WorkflowEvidenceReportSchema
 export function buildWorkflowEvidenceReport(value: unknown): WorkflowEvidenceReport {
   return { ...WorkflowInputSchema.parse(value), releaseAuthorized: false };
 }
+
+export const VerificationStateSchema = z.enum([
+  'verification',
+  'completed',
+  'waiting-for-human',
+  'failed',
+  'blocked',
+]);
+export type VerificationState = z.infer<typeof VerificationStateSchema>;
+
+export const VerificationFailureClassificationSchema = z.enum([
+  'product',
+  'test',
+  'environment',
+  'clarification',
+]);
+export type VerificationFailureClassification = z.infer<typeof VerificationFailureClassificationSchema>;
+
+export const VerificationTransitionSchema = z.object({
+  from: VerificationStateSchema,
+  to: VerificationStateSchema,
+  revision: z.string().min(1),
+  at: z.string().datetime(),
+  evidenceHash: z.string().length(64),
+});
+
+const VerificationInputSchema = WorkflowInputSchema.extend({
+  reportId: z.string().min(1),
+  revision: z.string().min(1),
+  reviewId: z.string().min(1),
+  patchHash: z.string().length(64),
+  state: VerificationStateSchema,
+  classification: VerificationFailureClassificationSchema.nullable(),
+  transitions: z.array(VerificationTransitionSchema).min(1),
+});
+
+export const VerificationEvidenceReportSchema = VerificationInputSchema.extend({ releaseAuthorized: z.literal(false) });
+export type VerificationEvidenceReport = z.infer<typeof VerificationEvidenceReportSchema>;
+
+/** Builds a revision-bound verification handoff without granting release authority. */
+export function buildVerificationEvidenceReport(value: unknown): VerificationEvidenceReport {
+  return { ...VerificationInputSchema.parse(value), releaseAuthorized: false };
+}
