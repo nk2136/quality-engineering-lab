@@ -25,7 +25,6 @@ function assertCitations(
     }
   }
 }
-
 function asRows(packageValue: ReadinessPackage): NonNullable<ReadinessPackage['discrepancyRows']> {
   return packageValue.discrepancyRows ?? packageValue.discrepancies ?? packageValue.discrepancyReport ?? [];
 }
