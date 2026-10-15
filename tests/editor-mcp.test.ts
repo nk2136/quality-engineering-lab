@@ -34,6 +34,74 @@ function data(result: Awaited<ReturnType<Client['callTool']>>) {
 }
 
 describe('editor MCP', () => {
+  it('exposes bounded investigation, design planning, and attached handoff inspection', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-editor-orchestration-'));
+    roots.push(root);
+    const workflows = new FileWorkflowStore(root);
+    const artifacts = new FileArtifactStore(root);
+    const traceId = '3d594650-3436-4d7c-86a7-2b94788009bc';
+    const workflow = await new LifecycleCoordinator(workflows).start({ id: 'STORY-QE-42', traceId, approvalRequired: false });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createEditorServer(root);
+    const client = new Client({ name: 'editor-orchestration-test', version: '1.0' });
+    clients.push(client);
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const evidence = (id: string, source: 'jira' | 'github' | 'test', content: string) => ({
+      id,
+      source,
+      uri: `local://${id}`,
+      revision: 'rev-7',
+      retrievedAt: '2026-10-15T12:00:00.000Z',
+      content,
+      estimatedTokens: Math.max(1, Math.ceil(content.length / 4)),
+      relevance: 1,
+    });
+    const investigation = await client.callTool({ name: 'investigate_requirements', arguments: {
+      workflowId: workflow.id,
+      traceId,
+      storyKey: 'QE-42',
+      sourceRevision: 'rev-7',
+      asOf: '2026-10-15T12:00:00.000Z',
+      evidence: {
+        ticket: [evidence('jira-QE-42', 'jira', JSON.stringify({ summary: 'Reject inactive members', acceptanceCriteria: ['Inactive members are rejected.'], component: 'membership' }))],
+        history: [],
+        source: [evidence('github-membership', 'github', JSON.stringify({ component: 'membership', revision: 'rev-7', files: ['src/membership.ts'] }))],
+        tests: [evidence('test-membership', 'test', JSON.stringify({ covers: ['Inactive members are rejected.'] }))],
+      },
+    }});
+    expect(investigation.isError).not.toBe(true);
+    const investigated = data(investigation);
+    expect(investigated.status).toBe('ready');
+    expect(investigated.artifacts).toHaveLength(3);
+    expect(investigated.artifacts.map((record: { id: string }) => record.id)).toContain('discrepancy:QE-42:rev-7');
+
+    const readinessArtifactId = investigated.artifacts.find((record: { metadata: { artifactRole?: string } }) => record.metadata.artifactRole === 'readiness-package').id;
+    const design = await client.callTool({ name: 'design_tests', arguments: {
+      workflowId: workflow.id,
+      readinessArtifactId,
+      projectProfile: { frameworkConventions: { testRunner: 'vitest' }, testConventions: ['Given When Then'] },
+    }});
+    expect(design.isError).not.toBe(true);
+    expect(data(design).value).toMatchObject({ artifactKind: 'test-design', decision: 'ready' });
+
+    const handoffs = await client.callTool({ name: 'inspect_handoff_artifacts', arguments: { workflowId: workflow.id } });
+    expect(handoffs.isError).not.toBe(true);
+    expect(data(handoffs).artifacts.map((record: { id: string }) => record.id)).toEqual([
+      'readiness-package:readiness:QE-42:rev-7',
+      'discrepancy:QE-42:rev-7',
+      'rtm:QE-42:rev-7',
+      'test-design:QE-42:rev-7',
+    ]);
+
+    const tools = (await client.listTools()).tools;
+    for (const name of ['investigate_requirements', 'design_tests', 'inspect_handoff_artifacts']) {
+      expect(tools.find(tool => tool.name === name)?.annotations?.readOnlyHint).toBe(true);
+    }
+    expect(tools.some(tool => /shell|filesystem|provider|execute|approve/i.test(tool.name))).toBe(false);
+  });
+
   it('cannot bypass Phase A through the MCP transition path or cross-trace artifacts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'qa-editor-gates-'));
     roots.push(root);
