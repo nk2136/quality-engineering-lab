@@ -4,19 +4,19 @@ Open this repository in VS Code with GitHub Copilot Chat available. The workspac
 
 ## Local setup
 
-Use Node.js 22 or newer. Run `npm ci`, then `npm run editor:mock` once to create the explicit synthetic demonstration. This setup command is not needed for ordinary SDET decisions after the stores already contain work. Real Jira, GitHub and model credentials are not required by the bridge.
+Use Node.js 22 or newer. Run `npm ci`, then `npm run editor:mock -- --root .qa-workflows` once to create the complete deterministic synthetic story-to-test workflow. Expected output is a JSON summary with `workflowId: "mock/QE-42"`, `status: "completed"`, and `revision: "mock-r1"`. Re-running the command is idempotent. It uses the merged workflow services with local file stores; no Jira, GitHub, model credentials, network, or production writes are involved.
 
 VS Code discovers `.vscode/mcp.json`. Run **MCP: List Servers**, select **qa-workflow**, and start/trust the repository's server when prompted by VS Code. It uses stdio and binds its filesystem stores to this workspace's `.qa-workflows` directory. Each separate checkout has separate local state. If Node cannot be found, ensure the VS Code process has Node on its PATH.
 
 Select **SDET Coordinator** and say:
 
-> Show pending questions for mock/QE-42 and explain the evidence needed to answer them.
+> Show the workflow and evidence for mock/QE-42. Explain the readiness, test-design, automation-review, and verification artifacts.
 
-For the synthetic example, say:
+The bootstrap has already completed the happy path. To exercise the human gate against a fresh local store, remove only the local `.qa-workflows` directory, run `npm run editor:mock` again, and use the coordinator's `request_decision` flow. For any human response, say:
 
 > This is mock data. Record me as Mock SDET: Mock Dev confirms that inactive-member requests are rejected with the documented response. Cite mock-QE-42-story.
 
-The agent shows the structured response and asks you to confirm it before writing. Confirm that concrete response. It records the immutable answer and can resume refinement for revalidation. It must not claim that the draft package is accepted or that Test Design started just because the workflow is pending.
+The agent shows the structured response and asks you to confirm it before writing. Confirm that concrete response. It records the immutable answer and can resume refinement for revalidation. It must not claim that a draft package is accepted or that Test Design started without the corresponding durable artifact and gate.
 
 Closing the editor preserves workflows, requests and responses. Reopen the same checkout and inspect them again. Re-running the mock seed preserves existing state; it does not recreate answered questions. The default store is ignored by Git. Do not put credentials or sensitive production data into mock artifacts or chat.
 
