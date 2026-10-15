@@ -184,4 +184,3 @@ export function validateReadinessPackage(value: unknown): ReadinessPackage {
 
   return packageValue;
 }
-
