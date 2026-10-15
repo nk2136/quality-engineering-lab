@@ -103,14 +103,18 @@ function relevance(query: string, path: string, content: string): number {
   return matched / queryTokens.size;
 }
 
-async function errorMessage(response: GitHubHttpResponse): Promise<string> {
+function redactSecret(value: string, secret: string | undefined): string {
+  return secret === undefined || secret === '' ? value : value.split(secret).join('[REDACTED]');
+}
+
+async function errorMessage(response: GitHubHttpResponse, authorization?: string): Promise<string> {
   try {
     const body = z.object({ message: z.string().min(1) }).safeParse(await response.json());
-    if (body.success) return body.data.message.slice(0, 500);
+    if (body.success) return redactSecret(body.data.message, authorization).slice(0, 500);
   } catch {
     // Retain a status-based error if GitHub returns a non-JSON response.
   }
-  return response.statusText || 'GitHub request failed';
+  return redactSecret(response.statusText || 'GitHub request failed', authorization);
 }
 
 /**
@@ -165,7 +169,7 @@ export class GitHubRepositoryKnowledgeSource implements KnowledgeSource {
         signal: AbortSignal.timeout(this.#timeoutMs),
       });
       if (!response.ok) {
-        throw new GitHubApiError(response.status, path, await errorMessage(response));
+        throw new GitHubApiError(response.status, path, await errorMessage(response, authorization));
       }
 
       const file = GitHubFileSchema.parse(await response.json());

@@ -120,7 +120,11 @@ export function adfToText(value: unknown): string {
   return nodeText(value).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-async function errorMessage(response: JiraHttpResponse): Promise<string> {
+function redactSecret(value: string, secret: string | undefined): string {
+  return secret === undefined || secret === '' ? value : value.split(secret).join('[REDACTED]');
+}
+
+async function errorMessage(response: JiraHttpResponse, authorization?: string): Promise<string> {
   try {
     const body = await response.json();
     const parsed = z.object({
@@ -131,13 +135,13 @@ async function errorMessage(response: JiraHttpResponse): Promise<string> {
       const details = [
         ...(parsed.data.errorMessages ?? []),
         ...Object.values(parsed.data.errors ?? {}),
-      ].join('; ').slice(0, 500);
-      if (details !== '') return details;
+      ].join('; ');
+      if (details !== '') return redactSecret(details, authorization).slice(0, 500);
     }
   } catch {
     // Preserve the status-based message when Jira does not return JSON.
   }
-  return response.statusText || 'Jira request failed';
+  return redactSecret(response.statusText || 'Jira request failed', authorization);
 }
 
 function issueContent(issue: z.infer<typeof JiraIssueSchema>): string {
@@ -234,7 +238,7 @@ export class JiraCloudKnowledgeSource implements KnowledgeSource {
       signal: AbortSignal.timeout(this.#timeoutMs),
     });
     if (!response.ok) {
-      throw new JiraApiError(response.status, await errorMessage(response));
+      throw new JiraApiError(response.status, await errorMessage(response, authorization));
     }
 
     const issue = JiraIssueSchema.parse(await response.json());
