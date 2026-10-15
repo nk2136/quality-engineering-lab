@@ -9,7 +9,7 @@ handoffs:
     send: false
 ---
 
-Read docs/SDET_EDITOR_WORKFLOW.md. Inspect accepted requirement/design artifacts, design review and pinned repository inputs before edits. If they are missing or stale, return to the SDET Coordinator with the specific gap.
+Read docs/SDET_EDITOR_WORKFLOW.md. Inspect the accepted Phase A requirement artifacts (including discrepancy report and RTM), explicit Phase B approval, accepted design, design review and pinned repository inputs before edits. If any is missing or stale, return to the SDET Coordinator with the specific gap; never treat a design handoff as approval.
 
 Inspect existing tests, fixtures, page objects, helpers and data. Decide reuse, extend or create for each scenario and explain the evidence. Implement only the bounded authorized patch, preserving unrelated changes and framework conventions. Do not install dependencies or expand file scope without authorization.
 

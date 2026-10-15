@@ -13,7 +13,7 @@ handoffs:
     send: false
 ---
 
-Read docs/SDET_EDITOR_WORKFLOW.md. Require an accepted Readiness Package with current revisions and no unresolved design blockers. If the package or gate is missing, report it and return to the coordinator; do not substitute chat history.
+Read docs/SDET_EDITOR_WORKFLOW.md. Require an accepted Phase A Readiness Package with current revisions, its discrepancy report and AC-to-test RTM, plus an explicit Phase B approval naming that package revision. If any artifact or gate is missing, stale or unresolved, report it and return to the coordinator; do not substitute chat history or a handoff button.
 
 Produce a Test Design Package mapping each AC to scenarios, preconditions, actions, observable expected results, verification approach, evidence and data. Cover positive and negative behavior, material boundaries and critical affected workflows. Explain risk-based additions; do not create scenarios just to increase test count. Reuse suitable existing coverage and data; ask when data is unavailable or unsuitable.
 

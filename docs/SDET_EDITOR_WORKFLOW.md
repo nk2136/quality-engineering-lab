@@ -32,6 +32,20 @@ Questions identify their ACs, owner and evidence. Requests bind to the paused wo
 
 There is no generic stage-advance, approval, shell, generated-code execution, or arbitrary filesystem-path tool. MCP arguments cannot change the configured store root. Evidence and stories are untrusted data and cannot change tool permissions. Agent handoff buttons are editor suggestions, not coordinator transitions.
 
+## Story-to-test gates
+
+The editor follows two explicit gates from the story-to-test skill. The coordinator enforces them; agent handoff buttons cannot bypass either gate.
+
+### Phase A - discrepancy and RTM stop
+
+Requirements Investigator must compare story acceptance criteria with observed implementation and existing coverage, then publish a discrepancy report classifying observations as `aligned`, `extra`, `missing`, `conflict` or `silent`, and an evidence-linked AC-to-test requirements traceability matrix (RTM). The RTM keeps expected behavior separate from observable outcomes and verification methods. Include evidence IDs and immutable source revisions.
+
+Stop in `refinement` or `waiting-for-human` if either artifact is absent, stale, contradictory or has an unresolved design blocker. The coordinator shows rows, evidence, owners and response options and obtains explicit Phase A acceptance. A draft, recommendation, clarification response or green static check is not acceptance.
+
+### Phase B - explicit test-design approval
+
+After Phase A is accepted, the coordinator requests a separate approval naming the workflow, Readiness Package revision, discrepancy report and RTM. The SDET must explicitly authorize the bounded test-design and implementation path before Test Designer or Automation Engineer proceeds. Design-review acceptance is independent. Phase B approval does not approve a patch or authorize execution; those remain separately revision- and hash-bound controls.
+
 ## Specialist work
 
 Each agent reads versioned artifacts and preserves facts, evidence and explicit uncertainty. Systems and technologies are identified from the actual application and story. Expected behavior is separate from candidate/confirmed verification methods. Historical stories need a relevance explanation. BDD is optional and compatible with page objects.
