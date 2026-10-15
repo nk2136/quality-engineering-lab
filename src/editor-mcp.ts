@@ -1,13 +1,16 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { RecordIdSchema } from './contracts.js';
+import { WorkflowStageSchema } from './context.js';
 import { FileArtifactStore, FileWorkflowStore } from './filesystem-stores.js';
 import { HumanDecisionService, HumanResponseInputSchema, PauseForHumanSchema, ResumeHumanDecisionSchema } from './human-decisions.js';
+import { LifecycleCoordinator } from './lifecycle-coordinator.js';
 
 /** The root is chosen at startup, never by agent-supplied tool arguments. */
 export function createEditorServer(root: string): McpServer {
   const workflows = new FileWorkflowStore(root);
   const artifacts = new FileArtifactStore(root);
+  const coordinator = new LifecycleCoordinator(workflows, artifacts);
   const decisions = new HumanDecisionService(workflows, artifacts);
   const server = new McpServer({ name: 'qa-workflow', version: '1.0.0' });
   const workflowInput = z.strictObject({ workflowId: RecordIdSchema });
@@ -46,6 +49,9 @@ export function createEditorServer(root: string): McpServer {
         artifact.traceId !== workflow.traceId) throw new Error('Artifact is not linked to this workflow.');
       return { artifact };
     });
+  tool('transition_workflow', 'Advance a workflow only when the coordinator validates the current Readiness Package and explicit Phase A/Phase B gates. Agent handoffs cannot bypass these gates.',
+    workflowInput.extend({ to: WorkflowStageSchema, artifactIds: z.array(RecordIdSchema).default([]) }), false,
+    async ({ workflowId, to, artifactIds }) => ({ workflow: await coordinator.transition(workflowId, to, artifactIds) }));
   tool('list_decisions', 'List unanswered questions for a workflow, including owners, affected ACs and evidence IDs.',
     workflowInput, true, async ({ workflowId }) => ({ decisions: await decisions.listPending(workflowId) }));
   tool('inspect_decision', 'Read a human request and its accepted response, if any.',

@@ -7,6 +7,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createEditorServer } from '../src/editor-mcp.js';
 import { seedEditorMock } from '../src/editor-mock.js';
+import { FileArtifactStore, FileWorkflowStore } from '../src/filesystem-stores.js';
+import { LifecycleCoordinator } from '../src/lifecycle-coordinator.js';
 
 const roots: string[] = [];
 const clients: Client[] = [];
@@ -32,6 +34,34 @@ function data(result: Awaited<ReturnType<Client['callTool']>>) {
 }
 
 describe('editor MCP', () => {
+  it('cannot bypass Phase A through the MCP transition path or cross-trace artifacts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'qa-editor-gates-'));
+    roots.push(root);
+    const workflows = new FileWorkflowStore(root);
+    const artifacts = new FileArtifactStore(root);
+    const traceId = 'b364b03e-88b0-4a8e-a9ea-99b5ea8077cf';
+    await new LifecycleCoordinator(workflows).start({ id: 'STORY-42', traceId });
+    await artifacts.put({ id: 'other-trace', traceId: '3d594650-3436-4d7c-86a7-2b94788009bc', kind: 'approval',
+      schemaVersion: '1.0', createdAt: '2026-09-30T00:00:00.000Z', content: {}, metadata: {} });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createEditorServer(root);
+    const client = new Client({ name: 'editor-gate-test', version: '1.0' });
+    clients.push(client);
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+
+    const bypass = await client.callTool({ name: 'transition_workflow', arguments: {
+      workflowId: 'STORY-42', to: 'planning', artifactIds: [],
+    } });
+    expect(bypass.isError).toBe(true);
+    expect(data(bypass).error).toMatch(/Phase A gate/);
+    const crossTrace = await client.callTool({ name: 'transition_workflow', arguments: {
+      workflowId: 'STORY-42', to: 'planning', artifactIds: ['other-trace'],
+    } });
+    expect(crossTrace.isError).toBe(true);
+    expect(data(crossTrace).error).toMatch(/another trace/);
+  });
+
   it('starts through the same stdio command configured in VS Code', async () => {
     const root = await mkdtemp(join(tmpdir(), 'qa-editor-stdio-'));
     roots.push(root);

@@ -12,6 +12,7 @@ import {
   type WorkflowStore,
 } from '../src/contracts.js';
 import { InMemoryWorkflowStore } from '../src/in-memory-stores.js';
+import { InMemoryArtifactStore } from '../src/in-memory-stores.js';
 import { FileWorkflowStore } from '../src/filesystem-stores.js';
 import { LifecycleCoordinator } from '../src/lifecycle-coordinator.js';
 
@@ -46,7 +47,115 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function gateArtifact(
+  id: string,
+  content: Record<string, unknown>,
+  artifactTrace = traceId,
+): import('../src/contracts.js').ArtifactRecord {
+  return {
+    id,
+    traceId: artifactTrace,
+    kind: id.includes('readiness') ? 'requirement-analysis' : 'approval',
+    schemaVersion: '1.0',
+    createdAt: firstTime,
+    content,
+    metadata: {},
+  };
+}
+
+function readinessPackageContent() {
+  return {
+    schemaVersion: '1.0',
+    packageId: 'readiness:QE-42:1',
+    revision: 'readiness-rev-1',
+    component: 'membership-service',
+    traceId,
+    storyKey: 'QE-42',
+    createdAt: firstTime,
+    provenance: { sources: [{ id: 'jira-QE-42', source: 'jira', revision: 'r1', evidenceIds: ['story'] }] },
+    acceptanceCriteria: [{ id: 'AC-1', statement: 'The request is rejected.', evidenceIds: ['story'] }],
+    confirmedFacts: [],
+    historicalRelevance: [{ id: 'HISTORY-1', statement: 'Existing coverage is relevant.', relevance: 'supports', evidenceIds: ['story'] }],
+    discrepancyRows: [{ id: 'DISCREPANCY-1', acId: 'AC-1', classification: 'aligned', description: 'Behavior matches.', evidenceIds: ['story'] }],
+    rtm: [{ id: 'RTM-1', acId: 'AC-1', expectedBehavior: 'The request is rejected.', observableOutcome: 'The response is HTTP 403.', verificationMethods: ['METHOD-1'], evidenceIds: ['story'] }],
+    acVerificationMap: [{
+      acId: 'AC-1', expectedBehavior: 'The request is rejected.',
+      observableOutcome: 'The response is HTTP 403.',
+      verificationMethods: [{ id: 'METHOD-1', description: 'API contract test', status: 'candidate', evidenceIds: ['story'] }],
+      evidenceIds: ['story'],
+    }],
+    accessDataPrerequisites: [], ownedClarifications: [], phaseSpecificBlockers: [],
+    proposedReadinessDecision: 'ready',
+    readinessDecision: 'ready-for-design',
+  };
+}
+
+async function addPhaseAGate(artifacts: InMemoryArtifactStore, workflowId = 'STORY-42') {
+  const packageRecord = gateArtifact('readiness:QE-42:1', readinessPackageContent());
+  const discrepancy = gateArtifact('discrepancy:QE-42:1', {
+    type: 'discrepancy-report', traceId, readinessPackageId: packageRecord.id,
+    rows: [{ id: 'AC-1', classification: 'aligned', evidenceIds: ['story'] }], unresolvedBlockers: [],
+  });
+  const rtm = gateArtifact('rtm:QE-42:1', {
+    type: 'traceability-matrix', traceId, readinessPackageId: packageRecord.id,
+    rows: [{ acId: 'AC-1', expectedBehavior: 'The request is rejected.', observableOutcome: 'The response is HTTP 403.', evidenceIds: ['story'] }],
+  });
+  const acceptance = gateArtifact('phase-a:QE-42:1', {
+    type: 'phase-gate-acceptance', phase: 'A', status: 'accepted', workflowId, traceId,
+    readinessPackageId: packageRecord.id, readinessPackageRevision: 'readiness-rev-1', discrepancyReportId: discrepancy.id, traceabilityMatrixId: rtm.id,
+  });
+  for (const record of [packageRecord, discrepancy, rtm, acceptance]) await artifacts.put(record);
+  return { packageRecord, discrepancy, rtm, acceptance };
+}
+
+async function addPhaseBGate(artifacts: InMemoryArtifactStore, phaseAId: string, workflowId = 'STORY-42') {
+  const approval = gateArtifact('phase-b:QE-42:1', {
+    type: 'phase-gate-approval', phase: 'B', status: 'approved', workflowId, traceId,
+    readinessPackageId: 'readiness:QE-42:1', readinessPackageRevision: 'readiness-rev-1', phaseAAcceptanceId: phaseAId,
+    discrepancyReportId: 'discrepancy:QE-42:1', traceabilityMatrixId: 'rtm:QE-42:1',
+  });
+  await artifacts.put(approval);
+  return approval;
+}
+
 describe('LifecycleCoordinator', () => {
+  it('enforces Phase A and Phase B gates when an artifact store is configured', async () => {
+    const workflows = new InMemoryWorkflowStore();
+    const artifacts = new InMemoryArtifactStore();
+    const lifecycle = new LifecycleCoordinator(workflows, artifacts);
+    await lifecycle.start({ id: 'STORY-42', traceId });
+
+    await expect(lifecycle.transition('STORY-42', 'planning')).rejects.toThrow('Phase A gate');
+    const phaseA = await addPhaseAGate(artifacts);
+    const planning = await lifecycle.transition('STORY-42', 'planning', [
+      phaseA.packageRecord.id, phaseA.discrepancy.id, phaseA.rtm.id, phaseA.acceptance.id,
+    ]);
+    expect(planning.stage).toBe('planning');
+    await expect(lifecycle.transition('STORY-42', 'implementation')).rejects.toThrow('Phase B gate');
+
+    const phaseB = await addPhaseBGate(artifacts, phaseA.acceptance.id);
+    await expect(lifecycle.transition('STORY-42', 'implementation', [phaseB.id])).resolves.toMatchObject({
+      stage: 'implementation', status: 'pending',
+    });
+  });
+
+  it('rejects stale gate references and cross-trace artifacts instead of allowing a bypass', async () => {
+    const workflows = new InMemoryWorkflowStore();
+    const artifacts = new InMemoryArtifactStore();
+    const lifecycle = new LifecycleCoordinator(workflows, artifacts);
+    await lifecycle.start({ id: 'STORY-42', traceId });
+    const phaseA = await addPhaseAGate(artifacts);
+    await artifacts.put(gateArtifact('phase-a-stale', {
+      type: 'phase-gate-acceptance', phase: 'A', status: 'accepted', workflowId: 'STORY-42', traceId,
+      readinessPackageId: 'readiness:QE-42:old', discrepancyReportId: phaseA.discrepancy.id,
+      traceabilityMatrixId: phaseA.rtm.id,
+    }));
+    await expect(lifecycle.transition('STORY-42', 'planning', ['phase-a-stale'])).rejects.toThrow('Phase A gate');
+
+    const otherTrace = gateArtifact('readiness:other', readinessPackageContent(), otherTraceId);
+    await artifacts.put(otherTrace);
+    await expect(lifecycle.transition('STORY-42', 'planning', [otherTrace.id])).rejects.toThrow('trace');
+  });
   it('starts a validated workflow with lifecycle defaults', async () => {
     const { coordinator: lifecycle } = coordinator();
 
