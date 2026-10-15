@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "qa-workflow": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/node_modules/tsx/dist/cli.mjs",
+        "${workspaceFolder}/src/editor-mcp-server.ts",
+        "--root", "${workspaceFolder}/.qa-workflows"
+      ]
+    }
+  }
+}

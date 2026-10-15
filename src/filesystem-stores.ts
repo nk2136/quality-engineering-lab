@@ -111,6 +111,21 @@ export class FileArtifactStore implements ArtifactStore {
 export class FileWorkflowStore implements WorkflowStore {
   constructor(private readonly root: string) {}
 
+  async list(): Promise<readonly WorkflowState[]> {
+    let entries;
+    try {
+      entries = await readdir(join(this.root, 'workflows'), { withFileTypes: true });
+    } catch (error) {
+      if (isCode(error, 'ENOENT')) return [];
+      throw error;
+    }
+    const records = await Promise.all(entries
+      .filter(entry => entry.isDirectory() && /^(?:[0-9a-f]{2})+$/.test(entry.name))
+      .map(entry => this.get(Buffer.from(entry.name, 'hex').toString('utf8'))));
+    return records.filter((record): record is WorkflowState => record !== undefined)
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
   pathFor(id: string, version = 0): string {
     return join(
       this.root,

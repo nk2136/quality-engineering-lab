@@ -105,6 +105,10 @@ This command does not call a provider and does not execute a patch. It can retur
 
 `FileWorkflowStore` and `FileArtifactStore` provide filesystem-backed persistence for lifecycle checkpoints and artifacts. The current Story Readiness workflow continues to use its existing store wiring; a later vertical-slice plan will connect it to these durable stores.
 
+## SDET agents in VS Code
+
+The workspace includes named Copilot custom agents and a local MCP bridge for persistent human questions. Run `npm run editor:mock` to seed a synthetic pause, start the `qa-workflow` server from VS Code, and select **SDET Coordinator** in Chat. You can inspect questions, confirm a structured response, and resume the same stage for revalidation. See [Editor workflow](docs/SDET_EDITOR_WORKFLOW.md) for setup, tools and remaining automation boundaries.
+
 ## Repository map
 
 ```text
