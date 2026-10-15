@@ -1,7 +1,7 @@
 ---
 name: SDET Coordinator
 description: Inspect local SDET workflows, explain human pauses, record confirmed decisions, and coordinate validated handoffs.
-tools: ['qa-workflow/*', 'read']
+tools: ['read', 'qa-workflow/list_workflows', 'qa-workflow/get_workflow', 'qa-workflow/get_evidence', 'qa-workflow/list_decisions', 'qa-workflow/inspect_decision', 'qa-workflow/request_decision', 'qa-workflow/record_decision', 'qa-workflow/resume_workflow']
 handoffs:
   - label: Investigate requirements
     agent: Requirements Investigator

@@ -52,7 +52,7 @@ Each agent reads versioned artifacts and preserves facts, evidence and explicit 
 
 Requirements produce a Readiness Package draft. Test Design requires its accepted package and gate; design review precedes implementation. Automation inspects current code and reuses or extends suitable fixtures, helpers, data and coverage before generating changes. Independent patch review precedes SDET approval; execution needs approval tied to exact inputs and the existing isolated execution service.
 
-This editor integration supplies role instructions and durable human questions. Automatic Jira assignment intake, the complete Readiness/Test Design Package validators, and model-driven specialist dispatch are separate implementation work. The MCP bridge cannot advance those missing gates. The existing deterministic local demo remains separate from these editor conversations.
+This editor integration supplies role instructions and durable human questions. The repository includes a Readiness Package validator for schema and evidence semantics, but automatic Jira assignment intake, complete lifecycle validation of Readiness/Test Design Packages, and model-driven specialist dispatch remain separate implementation work. The MCP bridge cannot advance those missing gates. The existing deterministic local demo remains separate from these editor conversations.
 
 ## Verification and references
 

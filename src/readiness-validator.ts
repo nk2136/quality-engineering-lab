@@ -12,7 +12,6 @@ function assertUnique(ids: readonly string[], label: string): void {
     seen.add(id);
   }
 }
-
 function assertCitations(
   items: readonly CitedItem[],
   declaredEvidence: ReadonlySet<string>,
